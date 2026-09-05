@@ -161,3 +161,4 @@ export const SafetyAlertsBadge: React.FC<SafetyAlertsBadgeProps> = ({
     </div>
   );
 };
+

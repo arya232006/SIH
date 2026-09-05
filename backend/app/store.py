@@ -107,7 +107,7 @@ class SessionStore:
             language=reg.language,
             ayushMode=reg.ayushMode or (reg.medicalSystem == "ayurveda"),
             homeopathyMode=reg.homeopathyMode or (reg.medicalSystem == "homeopathy"),
-            medicalSystem=reg.medicalSystem or ("homeopathy" if reg.homeopathyMode else ("ayurveda" if reg.ayushMode else "allopathy")),
+            medicalSystem=reg.medicalSystem if reg.medicalSystem != "allopathy" else ("homeopathy" if reg.homeopathyMode else ("ayurveda" if reg.ayushMode else "allopathy")),
             connectivityStatus="online",
             flaggedForStaff=False,
             chiefComplaint="",
