@@ -169,3 +169,4 @@ def test_drug_fuzzy_autocomplete():
     suggestions = res.json()
     assert len(suggestions) > 0
     assert any("Azulix" in s["brand"] for s in suggestions)
+

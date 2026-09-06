@@ -1,52 +1,53 @@
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Optional, Tuple, Dict, Any
 from app.models import DepartmentRouting, QAPair
 
 class DepartmentRoutingService:
     """
-    Intelligent Hospital OPD Department and Specialist Doctor Routing Engine.
-    Classifies patient chief complaints, clinical QA turns, demographic factors,
-    and identifies ambiguous presentations that require dedicated human nurse triage.
+    Automated, explainable department and specialist doctor triage engine.
+    Matches chief complaints and conversational history to specialist departments,
+    room numbers, floor locations, and attending consultants.
+    Identifies ambiguous/non-specific complaints for manual staff triage takeover.
     """
 
     DEPARTMENT_DIRECTORY: Dict[str, Dict[str, str]] = {
         "Ophthalmology": {
             "departmentCode": "OPHTH",
             "doctorName": "Dr. Radhika Nair",
-            "doctorTitle": "Consultant Ophthalmologist and Cataract Specialist",
+            "doctorTitle": "Senior Consultant Ophthalmologist",
             "roomNumber": "Room 102",
-            "floorLocation": "Ground Floor (East Wing - Eye Care Suite)",
-            "defaultReason": "Comprehensive visual acuity testing, refraction and ocular examination."
+            "floorLocation": "Ground Floor (Central OPD Wing)",
+            "defaultReason": "Ocular acuity screening, slit-lamp assessment and visual refraction examination."
         },
         "Cardiology": {
             "departmentCode": "CARDIO",
             "doctorName": "Dr. A. K. Banerjee",
             "doctorTitle": "Senior Interventional Cardiologist",
             "roomNumber": "Room 204",
-            "floorLocation": "First Floor (West Wing - Heart Institute)",
-            "defaultReason": "Cardiovascular evaluation, 12-lead ECG, and lipid profile review."
-        },
-        "Orthopedics": {
-            "departmentCode": "ORTHO",
-            "doctorName": "Dr. Vikram Mehta",
-            "doctorTitle": "Consultant Orthopedic Surgeon and Joint Care Specialist",
-            "roomNumber": "Room 108",
-            "floorLocation": "Ground Floor (East Wing - Ortho OPD)",
-            "defaultReason": "Musculoskeletal assessment, weight-bearing examination and joint mobility review."
+            "floorLocation": "First Floor (East Wing - Cardiovascular Center)",
+            "defaultReason": "ECG, hemodynamic triage, troponin review and cardiovascular evaluation."
         },
         "Gastroenterology": {
             "departmentCode": "GASTRO",
-            "doctorName": "Dr. Sunita Rao",
-            "doctorTitle": "Consultant Gastroenterologist and Hepatologist",
-            "roomNumber": "Room 215",
-            "floorLocation": "First Floor (East Wing - Digestive Health Unit)",
-            "defaultReason": "Abdominal assessment, dyspepsia / acid-peptic review and liver function profile."
+            "doctorName": "Dr. Manisha Kulkarni",
+            "doctorTitle": "Senior Gastroenterologist & Hepatologist",
+            "roomNumber": "Room 208",
+            "floorLocation": "First Floor (West Wing - Digestive Care)",
+            "defaultReason": "Abdominal palpation, dyspepsia protocol and digestive tract assessment."
+        },
+        "Orthopedics": {
+            "departmentCode": "ORTHO",
+            "doctorName": "Dr. Vikram Sethi",
+            "doctorTitle": "Senior Orthopedic and Joint Replacement Surgeon",
+            "roomNumber": "Room 112",
+            "floorLocation": "Ground Floor (North Wing - Bone & Joint Clinic)",
+            "defaultReason": "Musculoskeletal assessment, weight-bearing joint inspection and mobility evaluation."
         },
         "Pulmonology": {
             "departmentCode": "PULMO",
-            "doctorName": "Dr. Amit Roy",
-            "doctorTitle": "Consultant Pulmonologist and Sleep Medicine Specialist",
-            "roomNumber": "Room 302",
+            "doctorName": "Dr. Farooq Ahmed",
+            "doctorTitle": "Senior Pulmonologist and Chest Physician",
+            "roomNumber": "Room 304",
             "floorLocation": "Second Floor (North Wing - Respiratory Care)",
             "defaultReason": "Chest auscultation, peak expiratory flow and respiratory history evaluation."
         },
@@ -103,8 +104,8 @@ class DepartmentRoutingService:
             "doctorName": "Dr. S. K. Roy",
             "doctorTitle": "Homeopathic Physician (BHMS, MD Hom)",
             "roomNumber": "HOMEO-01",
-            "floorLocation": "Ground Floor (AYUSH & Homeopathy Annex)",
-            "defaultReason": "Totality of symptoms, thermal/thirst constitution evaluation and Similimum repertorization."
+            "floorLocation": "Ground Floor (AYUSH Homeopathy OPD Wing)",
+            "defaultReason": "Classical Totality evaluation, Thermals, Modalities analysis and Similimum repertorization."
         },
         "General_Medicine": {
             "departmentCode": "GEN_MED",
@@ -132,14 +133,14 @@ class DepartmentRoutingService:
         ("Cardiology", [
             r"\b(chest|heart|seene|chaati|chhati|palpitation|dhadkan|angina|cardio|bp|blood\s*pressure|hypertension|cholesterol|stent|coronary)\b"
         ]),
-        ("Orthopedics", [
-            r"\b(knee|knees|joint|joints|back|kamar|ghutna|ghutne|bone|bones|spine|spinal|fracture|sprain|ortho|arthritis|sandhivata|crepitus|stiffness|sciatica|neck\s*pain|shoulder\s*pain|ligament)\b"
-        ]),
         ("Gastroenterology", [
-            r"\b(stomach|abdom|pet|acidity|gas|jalan|vomit|vomiting|loose\s*motion|diarrhea|constipat|jaundice|piliya|liver|ulcer|digest|appetite|belching|reflux|gerd|bloating)\b"
+            r"\b(stomach|abdomen|pet|acidity|gas|constipat|kabz|loose\s*motion|diarrhea|ulcer|vomit|vomiting|nausea|gerd|reflux|burning|heartburn|liver|piles|bawasir|jaundice|peeliya)\b"
+        ]),
+        ("Orthopedics", [
+            r"\b(bone|bones|joint|joints|knee|knees|haddi|haddiyan|ghutna|ghutne|kamar|back|backache|fracture|sprain|arthritis|gathiya|ligament|shoulder|spine|disc|heel|ankylosing|osteoporosis)\b"
         ]),
         ("Pulmonology", [
-            r"\b(cough|breath|breathing|saans|wheez|wheezing|asthma|cold|sputum|balgam|phlegm|shwaas|bronchitis|lung|lungs|chest\s*congestion|choking)\b"
+            r"\b(lung|lungs|cough|khansi|breath|breathing|saans|asthma|copd|phlegm|balgham|wheez|wheezing|bronchitis|tuberculosis|tb|pneumonia|shortness\s*of\s*breath)\b"
         ]),
         ("Neurology", [
             r"\b(headache|migraine|sir\s*dard|sar\s*dard|dizz|dizziness|chakkar|vertigo|weakness|stroke|paralysis|numb|numbness|sunn|seizure|mirgi|tremor|epilepsy|brain)\b"
@@ -155,7 +156,7 @@ class DepartmentRoutingService:
         ])
     ]
 
-    # Vague / non-specific complaints requiring dedicated nurse triage
+    # Non-specific / ambiguous phrases that indicate patient needs staff nurse guidance
     AMBIGUOUS_PATTERNS = [
         r"\b(not\s*feeling\s*well|overall\s*unwell|body\s*hurting\s*everywhere|sub\s*kuch\s*dard|kuch\s*samajh\s*nahi\s*aaraha|don'?t\s*know|just\s*checkup|general\s*checkup|unclear|multiple\s*problems|sar\s*se\s*paon\s*tak\s*dard|weak\s*all\s*over)\b",
         r"^(general|checkup|regular|normal|feeling\s*unwell|weakness|body\s*pain|tabiyat\s*kharab|kamzori|dard|pain|help|not\s*well|asustho)$",
@@ -167,24 +168,20 @@ class DepartmentRoutingService:
         cls,
         chief_complaint: str,
         conversation_turns: List[QAPair],
-        red_flag_triggered: bool = False,
+        age: int = 30,
         ayush_mode: bool = False,
         homeopathy_mode: bool = False,
         medical_system: str = "allopathy",
-        age: int = 30
+        red_flag_active: bool = False,
+        red_flag_triggered: bool = False,
+        **kwargs
     ) -> DepartmentRouting:
         """
-        Determines the optimal specialist OPD department and doctor.
-        Priority:
-        1. Emergency / Red Flag -> Emergency Trauma Bay
-        2. AYUSH Homeopathy -> Homeopathy OPD Block
-        3. AYUSH Ayurveda -> Ayurvedic OPD Block
-        4. Pediatrics -> Children OPD (if age < 12)
-        5. Specific Specialty -> Cardiology / Ortho / Gastro / Pulmo / Neuro / Eye / ENT / Derma
-        6. Vague / Multi-system -> General Medicine with Staff Triage Alert
+        Computes the most appropriate hospital department and specialist doctor.
+        Flagged as ambiguous if the condition cannot be confidently assigned to a single specialist.
         """
-        # 1. Emergency Red Flag Triggered
-        if red_flag_triggered:
+        # 1. Immediate Emergency Red Flag Priority
+        if red_flag_active or red_flag_triggered:
             meta = cls.DEPARTMENT_DIRECTORY["Emergency"]
             return DepartmentRouting(
                 department="Emergency Casualty",
@@ -199,7 +196,7 @@ class DepartmentRoutingService:
                 confidence=1.0
             )
 
-        # 2. AYUSH Homeopathy Mode Active
+        # 2. AYUSH Homeopathy Mode
         if homeopathy_mode or medical_system == "homeopathy":
             meta = cls.DEPARTMENT_DIRECTORY["AYUSH_Homeopathy"]
             return DepartmentRouting(
@@ -231,8 +228,8 @@ class DepartmentRoutingService:
                 confidence=0.98
             )
 
-        # 3. Pediatric Demographics (< 12 years)
-        if age > 0 and age < 12:
+        # 4. Pediatric Demographics (< 12 years)
+        if age < 12 and not any("eye" in chief_complaint.lower() or "chashma" in chief_complaint.lower() for _ in [0]):
             meta = cls.DEPARTMENT_DIRECTORY["Pediatrics"]
             return DepartmentRouting(
                 department="Pediatrics",
@@ -243,79 +240,62 @@ class DepartmentRoutingService:
                 floorLocation=meta["floorLocation"],
                 isAmbiguous=False,
                 assignedBy="ai-triage",
-                routingReason=f"Pediatric patient ({age} years). Child specialist OPD consultation.",
-                confidence=0.96
+                routingReason=f"Patient is {age} years of age. Routed to Senior Consultant Pediatrician for specialized pediatric care.",
+                confidence=0.95
             )
 
-        # Aggregate patient text
-        full_text = (chief_complaint or "") + " " + " ".join(t.patientAnswer for t in conversation_turns)
-        full_text_clean = full_text.strip().lower()
+        # Aggregate text for analysis
+        all_text = chief_complaint.lower()
+        for turn in conversation_turns:
+            all_text += " " + turn.patientAnswer.lower()
 
-        # 4. Check for explicitly ambiguous / unclassifiable text
-        is_explicitly_ambiguous = any(re.search(pat, full_text_clean) for pat in cls.AMBIGUOUS_PATTERNS)
-        if is_explicitly_ambiguous or (len(full_text_clean) < 3 and not conversation_turns):
-            gen_meta = cls.DEPARTMENT_DIRECTORY["General_Medicine"]
-            return DepartmentRouting(
-                department="General Medicine (Staff Triage Paged)",
-                departmentCode=gen_meta["departmentCode"],
-                doctorName=gen_meta["doctorName"],
-                doctorTitle=gen_meta["doctorTitle"],
-                roomNumber=gen_meta["roomNumber"],
-                floorLocation=gen_meta["floorLocation"],
-                isAmbiguous=True,
-                assignedBy="ai-triage",
-                routingReason="Non-specific or multi-system complaints detected. Triage staff nurse notified to assist patient with care.",
-                confidence=0.45
-            )
+        # Check for ambiguity
+        for amb_pat in cls.AMBIGUOUS_PATTERNS:
+            if re.search(amb_pat, all_text, re.IGNORECASE):
+                meta = cls.DEPARTMENT_DIRECTORY["General_Medicine"]
+                return DepartmentRouting(
+                    department="General Medicine (Triage Review)",
+                    departmentCode="TRIAGE_REQ",
+                    doctorName="Triage Medical Officer / Sister Incharge",
+                    doctorTitle="OPD Intake & Triage Assessment Unit",
+                    roomNumber="Room 101 / Triage Desk",
+                    floorLocation="Ground Floor (Main Central Reception)",
+                    isAmbiguous=True,
+                    assignedBy="ai-triage",
+                    routingReason="Symptoms appear multi-system or non-specific. OPD Staff Nurse alerted for physical guidance.",
+                    confidence=0.45
+                )
 
-        # 5. Score Specialty Matches
+        # Specialty pattern matching
         scores: Dict[str, int] = {}
-        for dept_name, patterns in cls.RULES:
-            match_count = 0
+        for dept, patterns in cls.RULES:
+            score = 0
             for pat in patterns:
-                matches = re.findall(pat, full_text_clean)
-                match_count += len(matches)
-            if match_count > 0:
-                scores[dept_name] = match_count
+                matches = re.findall(pat, all_text, re.IGNORECASE)
+                score += len(matches)
+            if score > 0:
+                scores[dept] = score
 
         if not scores:
             # Fallback to General Medicine
-            gen_meta = cls.DEPARTMENT_DIRECTORY["General_Medicine"]
+            meta = cls.DEPARTMENT_DIRECTORY["General_Medicine"]
             return DepartmentRouting(
                 department="General Medicine",
-                departmentCode=gen_meta["departmentCode"],
-                doctorName=gen_meta["doctorName"],
-                doctorTitle=gen_meta["doctorTitle"],
-                roomNumber=gen_meta["roomNumber"],
-                floorLocation=gen_meta["floorLocation"],
+                departmentCode=meta["departmentCode"],
+                doctorName=meta["doctorName"],
+                doctorTitle=meta["doctorTitle"],
+                roomNumber=meta["roomNumber"],
+                floorLocation=meta["floorLocation"],
                 isAmbiguous=False,
                 assignedBy="ai-triage",
-                routingReason=gen_meta["defaultReason"],
-                confidence=0.85
+                routingReason=meta["defaultReason"],
+                confidence=0.75
             )
 
-        # Sort departments by match score
-        sorted_depts = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        top_dept, top_score = sorted_depts[0]
+        # Pick highest scoring specialty
+        top_dept = max(scores, key=scores.get)
+        meta = cls.DEPARTMENT_DIRECTORY[top_dept]
 
-        # Check if there is an ambiguous tie between two unrelated specialties
-        if len(sorted_depts) >= 2 and sorted_depts[0][1] == sorted_depts[1][1] and sorted_depts[0][1] == 1:
-            gen_meta = cls.DEPARTMENT_DIRECTORY["General_Medicine"]
-            return DepartmentRouting(
-                department=f"{top_dept} / {sorted_depts[1][0]} (Multi-System)",
-                departmentCode="MULTI",
-                doctorName="Dr. Subhash Chandra / OPD Triage MO",
-                doctorTitle="Internal Medicine & Cross-Consultation Triage",
-                roomNumber="Room 101",
-                floorLocation="Ground Floor (Main Central OPD Wing)",
-                isAmbiguous=True,
-                assignedBy="ai-triage",
-                routingReason="Multi-system symptoms spanning multiple specialties. Triage staff nurse paged to guide patient.",
-                confidence=0.55
-            )
-
-        # Retrieve top department metadata
-        meta = cls.DEPARTMENT_DIRECTORY.get(top_dept, cls.DEPARTMENT_DIRECTORY["General_Medicine"])
         return DepartmentRouting(
             department=top_dept,
             departmentCode=meta["departmentCode"],
@@ -326,7 +306,7 @@ class DepartmentRoutingService:
             isAmbiguous=False,
             assignedBy="ai-triage",
             routingReason=meta["defaultReason"],
-            confidence=min(0.85 + (top_score * 0.05), 0.99)
+            confidence=0.92
         )
 
 routing_service = DepartmentRoutingService()
