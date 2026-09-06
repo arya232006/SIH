@@ -24,76 +24,68 @@ excluded from the image by `.dockerignore`.
 
 ## Where to host
 
-The constraint is no spin-down, so anything that sleeps after minutes of idling
-is out. Free-tier terms change often — verify current limits before relying on
-these.
+The constraint is no spin-down. Free-tier terms change often and have been
+contracting — verify current limits before relying on any of this.
 
-| Host | Sleeps? | Notes |
-|---|---|---|
-| **Hugging Face Spaces** (Docker) | After ~48h idle | Easiest free option. WebSockets work. Plausible home for an AI project. |
-| **Oracle Cloud Always Free** | Never | A real VM, genuinely free. Best technically; needs manual setup, and instance capacity is often unavailable. |
-| **Koyeb** | No (free instance) | Straightforward Docker deploy. |
-| **Fly.io** | Configurable (`min_machines_running = 1`) | Good, but the free allowance may not cover an always-on machine. |
+| Host | Verdict |
+|---|---|
+| **Render** (what we use) | Free, Docker-native, no card. Sleeps after 15 min idle, which an external pinger solves — see below. |
+| **Koyeb** | Free instance, Docker, does not sleep. Good alternative. |
+| **Fly.io** | Docker, `min_machines_running = 1` prevents idling. Requires a card. |
+| **Oracle Cloud Always Free** | Best technically: a real VM that never sleeps, with a persistent disk. ARM instance capacity is frequently unavailable, so not something to depend on against a deadline. |
 
-Avoid for the backend: Vercel and Netlify (serverless, no WebSockets, no
-persistent process), and anything that sleeps after minutes.
+**Hugging Face Spaces does not work for this project.** Docker Spaces are a paid
+feature, and free Gradio Spaces run on ZeroGPU, which is built for on-demand GPU
+functions rather than an always-on server with websockets. Static Spaces cannot
+run Python at all.
 
-## Deploying to Hugging Face Spaces (step by step)
+Avoid for the backend: Vercel and Netlify — serverless, no websockets, no
+persistent process.
 
-**1. Create the Space.** huggingface.co → your profile → New Space.
-Name it `medikiosk`, SDK **Docker** → *Blank*, visibility Public (private Spaces
-sleep more aggressively). Hardware: the free CPU basic tier.
+## Deploying to Render
 
-**2. Add the Space frontmatter.** A Docker Space reads its configuration from a
-YAML block at the very top of `README.md`. Without it the Space will not start.
-Add this as the **first lines** of `README.md`, before anything else:
+Render's free plan is Docker-native, needs no card, and spins down after 15
+minutes without traffic. That last part is fixed below.
 
-```yaml
----
-title: MediKiosk
-emoji: 🩺
-colorFrom: teal
-colorTo: indigo
-sdk: docker
-app_port: 7860
-pinned: false
----
-```
+**1. Create the service.** render.com → New → **Blueprint** → connect the GitHub
+repo → it reads `render.yaml` and configures everything. Approve.
 
-**3. Add the Space as a git remote and push.**
+Using the Blueprint rather than clicking through the dashboard means the
+configuration is versioned with the code.
 
-```bash
-git remote add space https://huggingface.co/spaces/<your-username>/medikiosk
-git push space feat/doctor-portal:main
-```
+**2. Supply the keys when prompted.** `render.yaml` marks them `sync: false`, so
+Render asks for `GEMINI_API_KEY` and `GROQ_API_KEY` at creation and never stores
+them in the repo. They can be edited later under Environment.
 
-Hugging Face asks for a username and an access token as the password — create
-one at Settings → Access Tokens with **write** permission. Your GitHub password
-will not work.
+**3. Wait for the first build.** Several minutes: it installs npm and pip
+dependencies and builds the frontend inside the image. The URL will look like
+`https://medikiosk.onrender.com`.
 
-**4. Set the API keys as secrets.** Space → Settings → *Variables and secrets* →
-New secret. Add `GEMINI_API_KEY`, and `GROQ_API_KEY` if you use it. Use
-**Secret**, not Variable — variables are visible to anyone viewing the Space.
+Every push to `main` redeploys automatically (`autoDeploy: true`).
 
-**5. Watch the build.** The Logs tab shows the Docker build. First build takes
-several minutes because it installs npm and pip dependencies. When it finishes
-the app is at `https://<username>-medikiosk.hf.space`.
+### Stopping it from sleeping
 
-### If it fails to start
+The free plan sleeps after 15 minutes idle and takes about a minute to wake --
+long enough to lose a judge's attention. Keep it awake with an external pinger:
+
+1. Sign up at **uptimerobot.com** (free) or **cron-job.org** (free).
+2. Add an HTTP(s) monitor for `https://<your-service>.onrender.com/api/healthz`.
+3. Interval: **5 minutes** (any value under 15 works).
+
+`/api/healthz` is unauthenticated and cheap, so this costs nothing meaningful.
+
+The arithmetic works out: the free plan allows 750 instance-hours per month
+across all free services, and one service running continuously uses about 730.
+So a single always-on service fits, but a second free service would not.
+
+### If it fails
 
 | Symptom | Cause |
 |---|---|
-| Space stuck on "Building" then errors | Read the Logs tab — usually a dependency failing to install |
-| App builds but the page never loads | `app_port` in the frontmatter does not match the port uvicorn binds (7860) |
-| `Permission denied` writing the database or uploads | The image must run as UID 1000; ours does via `USER appuser` |
-| Scanning fails but intake works | `GEMINI_API_KEY` missing from Space secrets, or the daily quota is spent |
-
-### Known limits on the free tier
-
-- The filesystem resets on restart, so uploaded documents and `medikiosk.db` do
-  not persist. Seeded demo patients come back on boot.
-- The Space sleeps after roughly 48 hours idle. Open the URL the morning of any
-  demo so the first visitor is not waiting on a cold start.
+| Build fails installing dependencies | Read the build log; usually a package needing a system library |
+| Deploys, then health check fails | The app must listen on `$PORT`, which the Dockerfile already honours |
+| App loads, scanning does not work | `GEMINI_API_KEY` missing, or the daily quota is spent |
+| First request after idle takes ~60s | The pinger is not running, or its interval is over 15 minutes |
 
 ## Things that will bite you
 

@@ -1,0 +1,28 @@
+# Render Blueprint. Create the service from this file rather than clicking
+# through the dashboard, so the configuration is versioned with the code.
+#
+# The free plan spins a service down after 15 minutes without inbound traffic
+# and takes roughly a minute to wake. That is fixed with an external uptime
+# pinger, not with anything in here -- see DEPLOY.md.
+
+services:
+  - type: web
+    name: medikiosk
+    runtime: docker
+    plan: free
+    # Singapore is the closest free region to India; the default is Oregon.
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Render restarts the service if this stops responding, and the pinger
+    # targets the same path to keep it awake.
+    healthCheckPath: /api/healthz
+    autoDeploy: true
+    envVars:
+      # sync: false means "prompt me in the dashboard" -- the value is never
+      # written into this file or the repository.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      # Render injects PORT itself; the Dockerfile already honours it.
