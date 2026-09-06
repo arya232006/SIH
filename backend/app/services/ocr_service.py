@@ -188,6 +188,75 @@ class OCRService:
             or file_bytes.startswith(b"%PDF")
         )
 
+    # Image types the vision API accepts directly.
+    VISION_MIME_TYPES = {"image/png", "image/jpeg", "image/webp", "image/heic", "image/heif"}
+
+    @classmethod
+    def sniff_image_mime(cls, file_bytes: bytes, filename: str = "",
+                         declared: str = "") -> str:
+        """
+        Identifies an image from its own bytes rather than the client's label.
+
+        Phone browsers and scanner apps routinely declare 'application/octet-stream'
+        or mislabel a JPEG as PNG, and the vision API rejects the request outright
+        ("Unsupported MIME type") -- which used to surface as an unreadable
+        prescription rather than a wrong header. Magic bytes are authoritative;
+        the filename and the declared type are only fallbacks.
+        """
+        head = file_bytes[:16] if file_bytes else b""
+        if head.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if head.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+            return "image/webp"
+        if head[4:8] == b"ftyp" and head[8:12] in (b"heic", b"heix", b"hevc", b"mif1"):
+            return "image/heic"          # iPhones shoot this by default
+        if head.startswith(b"GIF8"):
+            return "image/gif"
+        if head.startswith(b"BM"):
+            return "image/bmp"
+        if head[:4] in (b"II*\x00", b"MM\x00*"):
+            return "image/tiff"
+
+        ext = os.path.splitext(filename or "")[1].lower()
+        by_ext = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".jpe": "image/jpeg",
+                  ".png": "image/png", ".webp": "image/webp", ".heic": "image/heic",
+                  ".heif": "image/heif", ".bmp": "image/bmp", ".tif": "image/tiff",
+                  ".tiff": "image/tiff", ".gif": "image/gif"}
+        if ext in by_ext:
+            return by_ext[ext]
+
+        declared = (declared or "").lower().strip()
+        if declared == "image/jpg":                      # common but not a real type
+            return "image/jpeg"
+        if declared in cls.VISION_MIME_TYPES:
+            return declared
+        return "image/png"
+
+    @classmethod
+    def prepare_image_for_vision(cls, file_bytes: bytes, filename: str = "",
+                                 declared: str = "") -> Tuple[bytes, str]:
+        """
+        Returns bytes and a MIME type the vision API will accept.
+
+        Formats it does not take (BMP, TIFF, GIF) are re-encoded to PNG rather
+        than rejected -- a patient photographing a document should not have to
+        care what their scanner app produced.
+        """
+        mime = cls.sniff_image_mime(file_bytes, filename, declared)
+        if mime in cls.VISION_MIME_TYPES:
+            return file_bytes, mime
+        try:
+            with Image.open(io.BytesIO(file_bytes)) as img:
+                buf = io.BytesIO()
+                img.convert("RGB").save(buf, format="PNG")
+                print(f"[OCR] converted {mime} to image/png for vision")
+                return buf.getvalue(), "image/png"
+        except Exception as exc:
+            print(f"[OCR] cannot convert {mime}: {exc}")
+            return file_bytes, mime
+
     @classmethod
     def _render_pdf_first_page_to_png(cls, pdf_bytes: bytes, output_png_path: str) -> bool:
         """Renders the first page of a PDF into a high-resolution PNG image thumbnail."""
@@ -256,8 +325,11 @@ class OCRService:
                 b64_image_for_llm = base64.b64encode(file_bytes).decode("utf-8")
                 llm_mime = "application/pdf"
         else:
-            # Standard Image
-            b64_image_for_llm = base64.b64encode(file_bytes).decode("utf-8")
+            # Standard image. The type is read from the bytes rather than taken
+            # from the client, which frequently mislabels or omits it.
+            vision_bytes, llm_mime = cls.prepare_image_for_vision(
+                file_bytes, filename, content_type)
+            b64_image_for_llm = base64.b64encode(vision_bytes).decode("utf-8")
 
         # 3. Attempt real Vision LLM extraction
         extracted_data, confidence, doc_type, flag, source = await cls._extract_with_vision_llm(

@@ -197,3 +197,70 @@ def test_a_drug_is_never_paired_with_itself():
 def test_unknown_drugs_do_not_break_the_safety_sweep():
     result = _safety(["Tab Xyzomite Forte", "Tab Telma 40"])
     assert result is not None
+
+
+# --- Upload format handling -------------------------------------------------
+
+def test_image_type_is_read_from_bytes_not_the_client_label():
+    """
+    Phone browsers and scanner apps mislabel uploads or omit the type entirely,
+    and the vision API rejects a wrong MIME outright -- which surfaced as an
+    unreadable prescription rather than a bad header.
+    """
+    import io
+    from PIL import Image
+    from app.services.ocr_service import OCRService
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), "white").save(buf, format="JPEG")
+    jpeg = buf.getvalue()
+
+    for lie in ["application/octet-stream", "image/png", "image/jpg", ""]:
+        assert OCRService.sniff_image_mime(jpeg, "scan", lie) == "image/jpeg"
+
+
+@pytest.mark.parametrize("fmt,expected", [
+    ("JPEG", "image/jpeg"), ("PNG", "image/png"), ("WEBP", "image/webp"),
+    ("BMP", "image/bmp"), ("TIFF", "image/tiff"), ("GIF", "image/gif"),
+])
+def test_common_image_formats_are_identified(fmt, expected):
+    import io
+    from PIL import Image
+    from app.services.ocr_service import OCRService
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), "white").save(buf, format=fmt)
+    assert OCRService.sniff_image_mime(buf.getvalue(), "scan", "") == expected
+
+
+@pytest.mark.parametrize("fmt", ["BMP", "TIFF", "GIF"])
+def test_formats_the_vision_api_rejects_are_converted_not_dropped(fmt):
+    """A patient should not have to care what their scanner app produced."""
+    import io
+    from PIL import Image
+    from app.services.ocr_service import OCRService
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), "white").save(buf, format=fmt)
+    _, mime = OCRService.prepare_image_for_vision(buf.getvalue(), "scan", "")
+    assert mime in OCRService.VISION_MIME_TYPES
+
+
+def test_supported_formats_are_passed_through_unchanged():
+    """No needless re-encoding, which would cost quality on handwriting."""
+    import io
+    from PIL import Image
+    from app.services.ocr_service import OCRService
+
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 40), "white").save(buf, format="JPEG")
+    original = buf.getvalue()
+    out, mime = OCRService.prepare_image_for_vision(original, "rx.jpg", "image/jpeg")
+    assert out == original and mime == "image/jpeg"
+
+
+def test_iphone_heic_is_recognised():
+    """iPhones shoot HEIC by default; it must not be guessed as PNG."""
+    from app.services.ocr_service import OCRService
+    heic = b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00" + b"\x00" * 32
+    assert OCRService.sniff_image_mime(heic, "IMG_0001.HEIC", "") == "image/heic"
