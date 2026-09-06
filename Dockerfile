@@ -29,10 +29,18 @@ COPY --from=frontend /build/dist ./frontend/dist
 # Mount a volume here if the platform offers one.
 RUN mkdir -p backend/app/uploads
 
+# Hugging Face Spaces runs the container as UID 1000, not root. Files copied in
+# as root would be unwritable, so the SQLite file and the uploads directory must
+# be owned by that user or the app fails on its first write.
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
 WORKDIR /app/backend
-ENV PYTHONUNBUFFERED=1 PORT=8000
-EXPOSE 8000
+# 7860 is the port Hugging Face Spaces expects. Hosts that inject their own PORT
+# (Koyeb, Fly, Cloud Run) override it.
+ENV PYTHONUNBUFFERED=1 PORT=7860
+EXPOSE 7860
 
 # GEMINI_API_KEY must be supplied as a platform secret, never baked into the
 # image. Without it the conversational flow still works; document OCR does not.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860}"]

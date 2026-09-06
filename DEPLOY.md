@@ -38,6 +38,63 @@ these.
 Avoid for the backend: Vercel and Netlify (serverless, no WebSockets, no
 persistent process), and anything that sleeps after minutes.
 
+## Deploying to Hugging Face Spaces (step by step)
+
+**1. Create the Space.** huggingface.co → your profile → New Space.
+Name it `medikiosk`, SDK **Docker** → *Blank*, visibility Public (private Spaces
+sleep more aggressively). Hardware: the free CPU basic tier.
+
+**2. Add the Space frontmatter.** A Docker Space reads its configuration from a
+YAML block at the very top of `README.md`. Without it the Space will not start.
+Add this as the **first lines** of `README.md`, before anything else:
+
+```yaml
+---
+title: MediKiosk
+emoji: 🩺
+colorFrom: teal
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+```
+
+**3. Add the Space as a git remote and push.**
+
+```bash
+git remote add space https://huggingface.co/spaces/<your-username>/medikiosk
+git push space feat/doctor-portal:main
+```
+
+Hugging Face asks for a username and an access token as the password — create
+one at Settings → Access Tokens with **write** permission. Your GitHub password
+will not work.
+
+**4. Set the API keys as secrets.** Space → Settings → *Variables and secrets* →
+New secret. Add `GEMINI_API_KEY`, and `GROQ_API_KEY` if you use it. Use
+**Secret**, not Variable — variables are visible to anyone viewing the Space.
+
+**5. Watch the build.** The Logs tab shows the Docker build. First build takes
+several minutes because it installs npm and pip dependencies. When it finishes
+the app is at `https://<username>-medikiosk.hf.space`.
+
+### If it fails to start
+
+| Symptom | Cause |
+|---|---|
+| Space stuck on "Building" then errors | Read the Logs tab — usually a dependency failing to install |
+| App builds but the page never loads | `app_port` in the frontmatter does not match the port uvicorn binds (7860) |
+| `Permission denied` writing the database or uploads | The image must run as UID 1000; ours does via `USER appuser` |
+| Scanning fails but intake works | `GEMINI_API_KEY` missing from Space secrets, or the daily quota is spent |
+
+### Known limits on the free tier
+
+- The filesystem resets on restart, so uploaded documents and `medikiosk.db` do
+  not persist. Seeded demo patients come back on boot.
+- The Space sleeps after roughly 48 hours idle. Open the URL the morning of any
+  demo so the first visitor is not waiting on a cold start.
+
 ## Things that will bite you
 
 **State lives in process memory.** The dispatch ledger, bed board, doctor tokens

@@ -1,3 +1,13 @@
+---
+title: MediKiosk
+emoji: 🩺
+colorFrom: teal
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # MediKiosk (मेडीकियोस्क) 🩺
 > **AI-Powered Clinical Pre-Consultation History Platform for Indian Hospital OPDs**
 
