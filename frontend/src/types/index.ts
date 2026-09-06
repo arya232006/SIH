@@ -194,7 +194,7 @@ export interface PriorInvestigation {
   timestamp: string;
   imageUrl?: string;
   status: 'success' | 'needs_review' | 'failed';
-  extractionSource?: 'vision_llm' | 'local_ocr_fallback' | 'sample_curated' | 'manual_correction';
+  extractionSource?: 'vision_llm' | 'local_ocr_fallback' | 'sample_curated' | 'manual_correction' | 'extraction_failed';
   clarificationStatus?: 'not_needed' | 'in_progress' | 'completed' | 'escalated_to_staff';
 }
 

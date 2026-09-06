@@ -515,6 +515,24 @@ export const StepScan: React.FC<StepScanProps> = ({
                 View Audit Scores
               </button>
             </div>
+          ) : activeDoc.extractionSource === 'extraction_failed' ? (
+            /* The read did not happen at all. Blaming the doctor's handwriting
+               here would be wrong and would send the patient off to retake a
+               photo that was never the problem. */
+            <div className="bg-rose-50 border-b border-rose-200 p-4 flex items-start space-x-3 text-rose-950">
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+              <div className="text-xs space-y-1">
+                <span className="font-extrabold text-rose-900 block">
+                  Could not read this document — nothing was extracted
+                </span>
+                <p className="text-rose-800">
+                  The document reader did not return a result. This is a service
+                  problem, not a problem with your prescription. Nothing has been
+                  guessed or filled in. Try again in a moment, or ask staff to
+                  enter the details.
+                </p>
+              </div>
+            </div>
           ) : isLowAccuracy ? (
             <div className="bg-amber-50 border-b border-amber-200 p-4 flex items-start justify-between text-amber-950">
               <div className="flex items-start space-x-3">
