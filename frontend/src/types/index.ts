@@ -194,7 +194,7 @@ export interface PriorInvestigation {
   timestamp: string;
   imageUrl?: string;
   status: 'success' | 'needs_review' | 'failed';
-  extractionSource?: 'vision_llm' | 'local_ocr_fallback' | 'sample_curated' | 'manual_correction';
+  extractionSource?: 'vision_llm' | 'local_ocr_fallback' | 'sample_curated' | 'manual_correction' | 'extraction_failed';
   clarificationStatus?: 'not_needed' | 'in_progress' | 'completed' | 'escalated_to_staff';
 }
 
@@ -395,6 +395,35 @@ export interface StaffAccount {
   fullName: string;
   role: string;
   department: string;
+}
+
+// Duty state is richer than free/busy: emergency dispatch needs to know whether
+// a doctor can be interrupted, not merely whether they are idle.
+export type DutyState = 'available' | 'on_rounds' | 'in_procedure' | 'off_duty';
+
+export interface DoctorAccount {
+  doctorId: string;
+  username: string;
+  fullName: string;
+  title: string;
+  department: string;
+  departmentCode: string;
+  registrationNumber: string;
+  privileges: string[];
+  roomNumber: string;
+  floorLocation: string;
+}
+
+export interface DoctorDutyStatus {
+  doctorId: string;
+  dutyState: DutyState;
+  onShift: boolean;
+  shiftStart: string;
+  shiftEnd: string;
+  onCall: boolean;
+  interruptible: boolean;
+  activeCaseCount: number;
+  acuityLoad: number;
 }
 
 export interface DifferentialDiagnosis {

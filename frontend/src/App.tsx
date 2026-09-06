@@ -7,6 +7,7 @@ import { ApiService } from './services/api';
 import { KioskContainer } from './pages/Kiosk/KioskContainer';
 import { PhysicianQueue } from './pages/Physician/PhysicianQueue';
 import { ClinicalReview } from './pages/Physician/ClinicalReview';
+import { RequireDoctor } from './pages/Physician/RequireDoctor';
 import { EmergencyDashboard } from './pages/Emergency/EmergencyDashboard';
 import { StaffLogin } from './pages/Staff/StaffLogin';
 import { StaffMonitor } from './pages/Staff/StaffMonitor';
@@ -213,9 +214,15 @@ export const App: React.FC = () => {
   const [connectivity, setConnectivity] = useState<ConnectivityStatus>('online');
   const [emergencyCount, setEmergencyCount] = useState<number>(0);
 
-  // Poll emergency red flag count for live navbar badge
+  // Poll emergency red flag count for live navbar badge. The queue carries
+  // patient names and complaints, so it is doctor-authenticated -- only poll
+  // once someone is signed in, and drop the badge when they sign out.
   useEffect(() => {
     const checkEmergencyQueue = async () => {
+      if (!ApiService.getDoctorToken()) {
+        setEmergencyCount(0);
+        return;
+      }
       try {
         const queue = await ApiService.getEmergencyQueue();
         setEmergencyCount(queue.length);
@@ -365,12 +372,21 @@ export const App: React.FC = () => {
               }
             />
 
-            {/* Physician OPD Flow */}
-            <Route path="/physician" element={<PhysicianQueue />} />
-            <Route path="/physician/session/:sessionId" element={<ClinicalReview />} />
+            {/* Physician OPD Flow (requires a signed-in doctor) */}
+            <Route
+              path="/physician"
+              element={<RequireDoctor><PhysicianQueue /></RequireDoctor>}
+            />
+            <Route
+              path="/physician/session/:sessionId"
+              element={<RequireDoctor><ClinicalReview /></RequireDoctor>}
+            />
 
-            {/* Dedicated Emergency & Casualty Red-Flag Flow */}
-            <Route path="/emergency" element={<EmergencyDashboard />} />
+            {/* Dedicated Emergency & Casualty Red-Flag Flow (requires a signed-in doctor) */}
+            <Route
+              path="/emergency"
+              element={<RequireDoctor><EmergencyDashboard /></RequireDoctor>}
+            />
 
             {/* Staff Intervention Flow */}
             <Route path="/staff" element={<StaffRoot />} />

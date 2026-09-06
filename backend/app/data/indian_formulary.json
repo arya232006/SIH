@@ -1,0 +1,1439 @@
+{
+  "_meta": {
+    "description": "Seed Indian pharmaceutical formulary: brand -> generic, with the strengths each brand is actually marketed in. Used to ground OCR output against real products rather than trusting the vision model's reading, and to normalise brands to generics so the DDI engine (whose rules are written in generic names) can see them.",
+    "coverage": "High-frequency OPD brands across the common therapeutic classes. This is a seed, not the full CDSCO register -- see README notes in formulary_service.load() for replacing it with a larger dataset without code changes.",
+    "schema": "brand | generic | strengths[] | class",
+    "version": "2026.09-seed"
+  },
+  "brands": [
+    {
+      "brand": "Glycomet",
+      "generic": "Metformin",
+      "strengths": [
+        "250mg",
+        "500mg",
+        "850mg",
+        "1000mg"
+      ],
+      "class": "Biguanide"
+    },
+    {
+      "brand": "Glycomet GP",
+      "generic": "Metformin + Glimepiride",
+      "strengths": [
+        "1mg",
+        "2mg"
+      ],
+      "class": "Antidiabetic combination"
+    },
+    {
+      "brand": "Azulix",
+      "generic": "Glimepiride",
+      "strengths": [
+        "1mg",
+        "2mg",
+        "3mg",
+        "4mg"
+      ],
+      "class": "Sulfonylurea"
+    },
+    {
+      "brand": "Amaryl",
+      "generic": "Glimepiride",
+      "strengths": [
+        "1mg",
+        "2mg",
+        "3mg",
+        "4mg"
+      ],
+      "class": "Sulfonylurea"
+    },
+    {
+      "brand": "Zoryl",
+      "generic": "Glimepiride",
+      "strengths": [
+        "1mg",
+        "2mg",
+        "3mg",
+        "4mg"
+      ],
+      "class": "Sulfonylurea"
+    },
+    {
+      "brand": "Glizid",
+      "generic": "Gliclazide",
+      "strengths": [
+        "40mg",
+        "80mg"
+      ],
+      "class": "Sulfonylurea"
+    },
+    {
+      "brand": "Diamicron",
+      "generic": "Gliclazide",
+      "strengths": [
+        "30mg",
+        "60mg",
+        "80mg"
+      ],
+      "class": "Sulfonylurea"
+    },
+    {
+      "brand": "Januvia",
+      "generic": "Sitagliptin",
+      "strengths": [
+        "25mg",
+        "50mg",
+        "100mg"
+      ],
+      "class": "DPP-4 inhibitor"
+    },
+    {
+      "brand": "Trajenta",
+      "generic": "Linagliptin",
+      "strengths": [
+        "5mg"
+      ],
+      "class": "DPP-4 inhibitor"
+    },
+    {
+      "brand": "Ondero",
+      "generic": "Linagliptin",
+      "strengths": [
+        "5mg"
+      ],
+      "class": "DPP-4 inhibitor"
+    },
+    {
+      "brand": "Ondero-D",
+      "generic": "Linagliptin + Dapagliflozin",
+      "strengths": [
+        "5mg",
+        "10mg"
+      ],
+      "class": "Antidiabetic combination"
+    },
+    {
+      "brand": "Galvus",
+      "generic": "Vildagliptin",
+      "strengths": [
+        "50mg"
+      ],
+      "class": "DPP-4 inhibitor"
+    },
+    {
+      "brand": "Zita",
+      "generic": "Teneligliptin",
+      "strengths": [
+        "20mg"
+      ],
+      "class": "DPP-4 inhibitor"
+    },
+    {
+      "brand": "Forxiga",
+      "generic": "Dapagliflozin",
+      "strengths": [
+        "5mg",
+        "10mg"
+      ],
+      "class": "SGLT2 inhibitor"
+    },
+    {
+      "brand": "Jardiance",
+      "generic": "Empagliflozin",
+      "strengths": [
+        "10mg",
+        "25mg"
+      ],
+      "class": "SGLT2 inhibitor"
+    },
+    {
+      "brand": "Lantus",
+      "generic": "Insulin Glargine",
+      "strengths": [
+        "100IU/ml"
+      ],
+      "class": "Basal insulin"
+    },
+    {
+      "brand": "Huminsulin",
+      "generic": "Human Insulin",
+      "strengths": [
+        "40IU/ml",
+        "100IU/ml"
+      ],
+      "class": "Insulin"
+    },
+    {
+      "brand": "Telma",
+      "generic": "Telmisartan",
+      "strengths": [
+        "20mg",
+        "40mg",
+        "80mg"
+      ],
+      "class": "ARB"
+    },
+    {
+      "brand": "Telma AM",
+      "generic": "Telmisartan + Amlodipine",
+      "strengths": [
+        "40mg",
+        "80mg"
+      ],
+      "class": "Antihypertensive combination"
+    },
+    {
+      "brand": "Telsartan",
+      "generic": "Telmisartan",
+      "strengths": [
+        "20mg",
+        "40mg",
+        "80mg"
+      ],
+      "class": "ARB"
+    },
+    {
+      "brand": "Telmikem",
+      "generic": "Telmisartan",
+      "strengths": [
+        "20mg",
+        "40mg",
+        "80mg"
+      ],
+      "class": "ARB"
+    },
+    {
+      "brand": "Losar",
+      "generic": "Losartan",
+      "strengths": [
+        "25mg",
+        "50mg",
+        "100mg"
+      ],
+      "class": "ARB"
+    },
+    {
+      "brand": "Losacar",
+      "generic": "Losartan",
+      "strengths": [
+        "25mg",
+        "50mg"
+      ],
+      "class": "ARB"
+    },
+    {
+      "brand": "Olmesar",
+      "generic": "Olmesartan",
+      "strengths": [
+        "10mg",
+        "20mg",
+        "40mg"
+      ],
+      "class": "ARB"
+    },
+    {
+      "brand": "Olmezest",
+      "generic": "Olmesartan",
+      "strengths": [
+        "20mg",
+        "40mg"
+      ],
+      "class": "ARB"
+    },
+    {
+      "brand": "Envas",
+      "generic": "Enalapril",
+      "strengths": [
+        "2.5mg",
+        "5mg",
+        "10mg"
+      ],
+      "class": "ACE inhibitor"
+    },
+    {
+      "brand": "Cardace",
+      "generic": "Ramipril",
+      "strengths": [
+        "1.25mg",
+        "2.5mg",
+        "5mg",
+        "10mg"
+      ],
+      "class": "ACE inhibitor"
+    },
+    {
+      "brand": "Amlong",
+      "generic": "Amlodipine",
+      "strengths": [
+        "2.5mg",
+        "5mg",
+        "10mg"
+      ],
+      "class": "Calcium channel blocker"
+    },
+    {
+      "brand": "Amlokind",
+      "generic": "Amlodipine",
+      "strengths": [
+        "2.5mg",
+        "5mg",
+        "10mg"
+      ],
+      "class": "Calcium channel blocker"
+    },
+    {
+      "brand": "Stamlo",
+      "generic": "Amlodipine",
+      "strengths": [
+        "2.5mg",
+        "5mg",
+        "10mg"
+      ],
+      "class": "Calcium channel blocker"
+    },
+    {
+      "brand": "Nebicard",
+      "generic": "Nebivolol",
+      "strengths": [
+        "2.5mg",
+        "5mg",
+        "10mg"
+      ],
+      "class": "Beta blocker"
+    },
+    {
+      "brand": "Metolar",
+      "generic": "Metoprolol",
+      "strengths": [
+        "25mg",
+        "50mg",
+        "100mg"
+      ],
+      "class": "Beta blocker"
+    },
+    {
+      "brand": "Betaloc",
+      "generic": "Metoprolol",
+      "strengths": [
+        "25mg",
+        "50mg"
+      ],
+      "class": "Beta blocker"
+    },
+    {
+      "brand": "Ciplar",
+      "generic": "Propranolol",
+      "strengths": [
+        "10mg",
+        "20mg",
+        "40mg"
+      ],
+      "class": "Beta blocker"
+    },
+    {
+      "brand": "Aten",
+      "generic": "Atenolol",
+      "strengths": [
+        "25mg",
+        "50mg",
+        "100mg"
+      ],
+      "class": "Beta blocker"
+    },
+    {
+      "brand": "Dytor",
+      "generic": "Torsemide",
+      "strengths": [
+        "5mg",
+        "10mg",
+        "20mg"
+      ],
+      "class": "Loop diuretic"
+    },
+    {
+      "brand": "Lasix",
+      "generic": "Furosemide",
+      "strengths": [
+        "40mg"
+      ],
+      "class": "Loop diuretic"
+    },
+    {
+      "brand": "Aldactone",
+      "generic": "Spironolactone",
+      "strengths": [
+        "25mg",
+        "50mg",
+        "100mg"
+      ],
+      "class": "Potassium-sparing diuretic"
+    },
+    {
+      "brand": "Atorva",
+      "generic": "Atorvastatin",
+      "strengths": [
+        "5mg",
+        "10mg",
+        "20mg",
+        "40mg",
+        "80mg"
+      ],
+      "class": "Statin"
+    },
+    {
+      "brand": "Storvas",
+      "generic": "Atorvastatin",
+      "strengths": [
+        "10mg",
+        "20mg",
+        "40mg"
+      ],
+      "class": "Statin"
+    },
+    {
+      "brand": "Lipitor",
+      "generic": "Atorvastatin",
+      "strengths": [
+        "10mg",
+        "20mg",
+        "40mg"
+      ],
+      "class": "Statin"
+    },
+    {
+      "brand": "Rosuvas",
+      "generic": "Rosuvastatin",
+      "strengths": [
+        "5mg",
+        "10mg",
+        "20mg",
+        "40mg"
+      ],
+      "class": "Statin"
+    },
+    {
+      "brand": "Crestor",
+      "generic": "Rosuvastatin",
+      "strengths": [
+        "5mg",
+        "10mg",
+        "20mg"
+      ],
+      "class": "Statin"
+    },
+    {
+      "brand": "Rozavel",
+      "generic": "Rosuvastatin",
+      "strengths": [
+        "5mg",
+        "10mg",
+        "20mg"
+      ],
+      "class": "Statin"
+    },
+    {
+      "brand": "Fenolip",
+      "generic": "Fenofibrate",
+      "strengths": [
+        "145mg",
+        "160mg",
+        "200mg"
+      ],
+      "class": "Fibrate"
+    },
+    {
+      "brand": "Stanlip",
+      "generic": "Fenofibrate",
+      "strengths": [
+        "145mg",
+        "160mg",
+        "200mg"
+      ],
+      "class": "Fibrate"
+    },
+    {
+      "brand": "Lipicard",
+      "generic": "Fenofibrate",
+      "strengths": [
+        "145mg",
+        "160mg",
+        "200mg"
+      ],
+      "class": "Fibrate"
+    },
+    {
+      "brand": "Ecosprin",
+      "generic": "Aspirin",
+      "strengths": [
+        "75mg",
+        "150mg",
+        "325mg"
+      ],
+      "class": "Antiplatelet"
+    },
+    {
+      "brand": "Ecosprin AV",
+      "generic": "Aspirin + Atorvastatin",
+      "strengths": [
+        "75mg",
+        "150mg"
+      ],
+      "class": "Antiplatelet combination"
+    },
+    {
+      "brand": "Clopilet",
+      "generic": "Clopidogrel",
+      "strengths": [
+        "75mg",
+        "150mg"
+      ],
+      "class": "Antiplatelet"
+    },
+    {
+      "brand": "Deplatt",
+      "generic": "Clopidogrel",
+      "strengths": [
+        "75mg",
+        "150mg"
+      ],
+      "class": "Antiplatelet"
+    },
+    {
+      "brand": "Warf",
+      "generic": "Warfarin",
+      "strengths": [
+        "1mg",
+        "2mg",
+        "5mg"
+      ],
+      "class": "Anticoagulant"
+    },
+    {
+      "brand": "Eliquis",
+      "generic": "Apixaban",
+      "strengths": [
+        "2.5mg",
+        "5mg"
+      ],
+      "class": "Anticoagulant"
+    },
+    {
+      "brand": "Xarelto",
+      "generic": "Rivaroxaban",
+      "strengths": [
+        "10mg",
+        "15mg",
+        "20mg"
+      ],
+      "class": "Anticoagulant"
+    },
+    {
+      "brand": "Pan",
+      "generic": "Pantoprazole",
+      "strengths": [
+        "20mg",
+        "40mg"
+      ],
+      "class": "Proton pump inhibitor"
+    },
+    {
+      "brand": "Pan-D",
+      "generic": "Pantoprazole + Domperidone",
+      "strengths": [
+        "40mg"
+      ],
+      "class": "PPI combination"
+    },
+    {
+      "brand": "Pantocid",
+      "generic": "Pantoprazole",
+      "strengths": [
+        "20mg",
+        "40mg"
+      ],
+      "class": "Proton pump inhibitor"
+    },
+    {
+      "brand": "Razo",
+      "generic": "Rabeprazole",
+      "strengths": [
+        "10mg",
+        "20mg"
+      ],
+      "class": "Proton pump inhibitor"
+    },
+    {
+      "brand": "Omez",
+      "generic": "Omeprazole",
+      "strengths": [
+        "10mg",
+        "20mg",
+        "40mg"
+      ],
+      "class": "Proton pump inhibitor"
+    },
+    {
+      "brand": "Nexpro",
+      "generic": "Esomeprazole",
+      "strengths": [
+        "20mg",
+        "40mg"
+      ],
+      "class": "Proton pump inhibitor"
+    },
+    {
+      "brand": "Rantac",
+      "generic": "Ranitidine",
+      "strengths": [
+        "150mg",
+        "300mg"
+      ],
+      "class": "H2 blocker"
+    },
+    {
+      "brand": "Digene",
+      "generic": "Antacid gel",
+      "strengths": [],
+      "class": "Antacid"
+    },
+    {
+      "brand": "Gelusil",
+      "generic": "Antacid gel",
+      "strengths": [],
+      "class": "Antacid"
+    },
+    {
+      "brand": "Cremaffin",
+      "generic": "Liquid paraffin + Milk of magnesia",
+      "strengths": [],
+      "class": "Laxative"
+    },
+    {
+      "brand": "Ondem",
+      "generic": "Ondansetron",
+      "strengths": [
+        "4mg",
+        "8mg"
+      ],
+      "class": "Antiemetic"
+    },
+    {
+      "brand": "Emeset",
+      "generic": "Ondansetron",
+      "strengths": [
+        "4mg",
+        "8mg"
+      ],
+      "class": "Antiemetic"
+    },
+    {
+      "brand": "Perinorm",
+      "generic": "Metoclopramide",
+      "strengths": [
+        "10mg"
+      ],
+      "class": "Prokinetic"
+    },
+    {
+      "brand": "Domstal",
+      "generic": "Domperidone",
+      "strengths": [
+        "10mg"
+      ],
+      "class": "Prokinetic"
+    },
+    {
+      "brand": "Udiliv",
+      "generic": "Ursodeoxycholic acid",
+      "strengths": [
+        "150mg",
+        "300mg"
+      ],
+      "class": "Hepatoprotective"
+    },
+    {
+      "brand": "Dolo",
+      "generic": "Paracetamol",
+      "strengths": [
+        "500mg",
+        "650mg"
+      ],
+      "class": "Analgesic / Antipyretic"
+    },
+    {
+      "brand": "Calpol",
+      "generic": "Paracetamol",
+      "strengths": [
+        "500mg",
+        "650mg"
+      ],
+      "class": "Analgesic / Antipyretic"
+    },
+    {
+      "brand": "Crocin",
+      "generic": "Paracetamol",
+      "strengths": [
+        "500mg",
+        "650mg"
+      ],
+      "class": "Analgesic / Antipyretic"
+    },
+    {
+      "brand": "Combiflam",
+      "generic": "Ibuprofen + Paracetamol",
+      "strengths": [
+        "400mg"
+      ],
+      "class": "NSAID combination"
+    },
+    {
+      "brand": "Brufen",
+      "generic": "Ibuprofen",
+      "strengths": [
+        "200mg",
+        "400mg",
+        "600mg"
+      ],
+      "class": "NSAID"
+    },
+    {
+      "brand": "Voveran",
+      "generic": "Diclofenac",
+      "strengths": [
+        "50mg",
+        "75mg",
+        "100mg"
+      ],
+      "class": "NSAID"
+    },
+    {
+      "brand": "Zerodol",
+      "generic": "Aceclofenac",
+      "strengths": [
+        "100mg"
+      ],
+      "class": "NSAID"
+    },
+    {
+      "brand": "Zerodol-SP",
+      "generic": "Aceclofenac + Paracetamol + Serratiopeptidase",
+      "strengths": [
+        "100mg"
+      ],
+      "class": "NSAID combination"
+    },
+    {
+      "brand": "Nise",
+      "generic": "Nimesulide",
+      "strengths": [
+        "100mg"
+      ],
+      "class": "NSAID"
+    },
+    {
+      "brand": "Ultracet",
+      "generic": "Tramadol + Paracetamol",
+      "strengths": [
+        "37.5mg"
+      ],
+      "class": "Opioid combination"
+    },
+    {
+      "brand": "Etoshine",
+      "generic": "Etoricoxib",
+      "strengths": [
+        "60mg",
+        "90mg",
+        "120mg"
+      ],
+      "class": "COX-2 inhibitor"
+    },
+    {
+      "brand": "Augmentin",
+      "generic": "Amoxicillin + Clavulanic acid",
+      "strengths": [
+        "375mg",
+        "625mg",
+        "1000mg"
+      ],
+      "class": "Beta-lactam antibiotic"
+    },
+    {
+      "brand": "Amoxyclav",
+      "generic": "Amoxicillin + Clavulanic acid",
+      "strengths": [
+        "375mg",
+        "625mg"
+      ],
+      "class": "Beta-lactam antibiotic"
+    },
+    {
+      "brand": "Moxikind-CV",
+      "generic": "Amoxicillin + Clavulanic acid",
+      "strengths": [
+        "375mg",
+        "625mg"
+      ],
+      "class": "Beta-lactam antibiotic"
+    },
+    {
+      "brand": "Novamox",
+      "generic": "Amoxicillin",
+      "strengths": [
+        "250mg",
+        "500mg"
+      ],
+      "class": "Beta-lactam antibiotic"
+    },
+    {
+      "brand": "Mox",
+      "generic": "Amoxicillin",
+      "strengths": [
+        "250mg",
+        "500mg"
+      ],
+      "class": "Beta-lactam antibiotic"
+    },
+    {
+      "brand": "Taxim-O",
+      "generic": "Cefixime",
+      "strengths": [
+        "100mg",
+        "200mg"
+      ],
+      "class": "Cephalosporin"
+    },
+    {
+      "brand": "Zifi",
+      "generic": "Cefixime",
+      "strengths": [
+        "100mg",
+        "200mg"
+      ],
+      "class": "Cephalosporin"
+    },
+    {
+      "brand": "Monocef",
+      "generic": "Ceftriaxone",
+      "strengths": [
+        "250mg",
+        "500mg",
+        "1g"
+      ],
+      "class": "Cephalosporin"
+    },
+    {
+      "brand": "Azithral",
+      "generic": "Azithromycin",
+      "strengths": [
+        "250mg",
+        "500mg"
+      ],
+      "class": "Macrolide"
+    },
+    {
+      "brand": "Azee",
+      "generic": "Azithromycin",
+      "strengths": [
+        "250mg",
+        "500mg"
+      ],
+      "class": "Macrolide"
+    },
+    {
+      "brand": "Cifran",
+      "generic": "Ciprofloxacin",
+      "strengths": [
+        "250mg",
+        "500mg",
+        "750mg"
+      ],
+      "class": "Fluoroquinolone"
+    },
+    {
+      "brand": "Ciplox",
+      "generic": "Ciprofloxacin",
+      "strengths": [
+        "250mg",
+        "500mg"
+      ],
+      "class": "Fluoroquinolone"
+    },
+    {
+      "brand": "Levoflox",
+      "generic": "Levofloxacin",
+      "strengths": [
+        "250mg",
+        "500mg",
+        "750mg"
+      ],
+      "class": "Fluoroquinolone"
+    },
+    {
+      "brand": "Norflox",
+      "generic": "Norfloxacin",
+      "strengths": [
+        "200mg",
+        "400mg"
+      ],
+      "class": "Fluoroquinolone"
+    },
+    {
+      "brand": "Flagyl",
+      "generic": "Metronidazole",
+      "strengths": [
+        "200mg",
+        "400mg"
+      ],
+      "class": "Nitroimidazole"
+    },
+    {
+      "brand": "Metrogyl",
+      "generic": "Metronidazole",
+      "strengths": [
+        "200mg",
+        "400mg"
+      ],
+      "class": "Nitroimidazole"
+    },
+    {
+      "brand": "Doxt",
+      "generic": "Doxycycline",
+      "strengths": [
+        "100mg"
+      ],
+      "class": "Tetracycline"
+    },
+    {
+      "brand": "Thyronorm",
+      "generic": "Levothyroxine",
+      "strengths": [
+        "12.5mcg",
+        "25mcg",
+        "50mcg",
+        "62.5mcg",
+        "75mcg",
+        "88mcg",
+        "100mcg",
+        "112mcg",
+        "125mcg",
+        "150mcg"
+      ],
+      "class": "Thyroid hormone"
+    },
+    {
+      "brand": "Eltroxin",
+      "generic": "Levothyroxine",
+      "strengths": [
+        "25mcg",
+        "50mcg",
+        "75mcg",
+        "100mcg"
+      ],
+      "class": "Thyroid hormone"
+    },
+    {
+      "brand": "Thyrox",
+      "generic": "Levothyroxine",
+      "strengths": [
+        "25mcg",
+        "50mcg",
+        "75mcg",
+        "100mcg"
+      ],
+      "class": "Thyroid hormone"
+    },
+    {
+      "brand": "Asthalin",
+      "generic": "Salbutamol",
+      "strengths": [
+        "2mg",
+        "4mg",
+        "100mcg"
+      ],
+      "class": "Beta-2 agonist"
+    },
+    {
+      "brand": "Levolin",
+      "generic": "Levosalbutamol",
+      "strengths": [
+        "1mg",
+        "2mg"
+      ],
+      "class": "Beta-2 agonist"
+    },
+    {
+      "brand": "Foracort",
+      "generic": "Formoterol + Budesonide",
+      "strengths": [
+        "100mcg",
+        "200mcg",
+        "400mcg"
+      ],
+      "class": "ICS + LABA inhaler"
+    },
+    {
+      "brand": "Seroflo",
+      "generic": "Salmeterol + Fluticasone",
+      "strengths": [
+        "100mcg",
+        "250mcg",
+        "500mcg"
+      ],
+      "class": "ICS + LABA inhaler"
+    },
+    {
+      "brand": "Budecort",
+      "generic": "Budesonide",
+      "strengths": [
+        "100mcg",
+        "200mcg",
+        "400mcg"
+      ],
+      "class": "Inhaled corticosteroid"
+    },
+    {
+      "brand": "Montair",
+      "generic": "Montelukast",
+      "strengths": [
+        "4mg",
+        "5mg",
+        "10mg"
+      ],
+      "class": "Leukotriene antagonist"
+    },
+    {
+      "brand": "Montek",
+      "generic": "Montelukast",
+      "strengths": [
+        "4mg",
+        "5mg",
+        "10mg"
+      ],
+      "class": "Leukotriene antagonist"
+    },
+    {
+      "brand": "Montek LC",
+      "generic": "Montelukast + Levocetirizine",
+      "strengths": [
+        "5mg",
+        "10mg"
+      ],
+      "class": "Antiallergic combination"
+    },
+    {
+      "brand": "Deriphyllin",
+      "generic": "Etophylline + Theophylline",
+      "strengths": [
+        "150mg",
+        "300mg"
+      ],
+      "class": "Bronchodilator"
+    },
+    {
+      "brand": "Ascoril",
+      "generic": "Cough syrup combination",
+      "strengths": [],
+      "class": "Antitussive"
+    },
+    {
+      "brand": "Allegra",
+      "generic": "Fexofenadine",
+      "strengths": [
+        "120mg",
+        "180mg"
+      ],
+      "class": "Antihistamine"
+    },
+    {
+      "brand": "Cetzine",
+      "generic": "Cetirizine",
+      "strengths": [
+        "5mg",
+        "10mg"
+      ],
+      "class": "Antihistamine"
+    },
+    {
+      "brand": "Avil",
+      "generic": "Pheniramine",
+      "strengths": [
+        "25mg",
+        "50mg"
+      ],
+      "class": "Antihistamine"
+    },
+    {
+      "brand": "Okacet",
+      "generic": "Cetirizine",
+      "strengths": [
+        "10mg"
+      ],
+      "class": "Antihistamine"
+    },
+    {
+      "brand": "Uprise-D3",
+      "generic": "Cholecalciferol",
+      "strengths": [
+        "1000IU",
+        "2000IU",
+        "60000IU"
+      ],
+      "class": "Vitamin D"
+    },
+    {
+      "brand": "Calcirol",
+      "generic": "Cholecalciferol",
+      "strengths": [
+        "60000IU"
+      ],
+      "class": "Vitamin D"
+    },
+    {
+      "brand": "Shelcal",
+      "generic": "Calcium carbonate + Vitamin D3",
+      "strengths": [
+        "250mg",
+        "500mg"
+      ],
+      "class": "Calcium supplement"
+    },
+    {
+      "brand": "Neurobion",
+      "generic": "Vitamin B complex",
+      "strengths": [],
+      "class": "Vitamin supplement"
+    },
+    {
+      "brand": "Nurokind",
+      "generic": "Mecobalamin",
+      "strengths": [
+        "500mcg",
+        "1500mcg"
+      ],
+      "class": "Vitamin B12"
+    },
+    {
+      "brand": "Nurokind Plus",
+      "generic": "Mecobalamin + Pyridoxine + Folic acid",
+      "strengths": [],
+      "class": "Neurotropic vitamin"
+    },
+    {
+      "brand": "Trinerve",
+      "generic": "Methylcobalamin + Alpha lipoic acid",
+      "strengths": [],
+      "class": "Neurotropic vitamin"
+    },
+    {
+      "brand": "Zincovit",
+      "generic": "Multivitamin + Zinc",
+      "strengths": [],
+      "class": "Multivitamin"
+    },
+    {
+      "brand": "Becosules",
+      "generic": "Vitamin B complex + Vitamin C",
+      "strengths": [],
+      "class": "Multivitamin"
+    },
+    {
+      "brand": "Livogen",
+      "generic": "Ferrous fumarate + Folic acid",
+      "strengths": [],
+      "class": "Haematinic"
+    },
+    {
+      "brand": "Orofer XT",
+      "generic": "Ferrous ascorbate + Folic acid",
+      "strengths": [
+        "100mg"
+      ],
+      "class": "Haematinic"
+    },
+    {
+      "brand": "Gabapin",
+      "generic": "Gabapentin",
+      "strengths": [
+        "100mg",
+        "300mg",
+        "400mg"
+      ],
+      "class": "Anticonvulsant"
+    },
+    {
+      "brand": "Pregeb",
+      "generic": "Pregabalin",
+      "strengths": [
+        "50mg",
+        "75mg",
+        "150mg"
+      ],
+      "class": "Anticonvulsant"
+    },
+    {
+      "brand": "Eptoin",
+      "generic": "Phenytoin",
+      "strengths": [
+        "50mg",
+        "100mg"
+      ],
+      "class": "Anticonvulsant"
+    },
+    {
+      "brand": "Levipil",
+      "generic": "Levetiracetam",
+      "strengths": [
+        "250mg",
+        "500mg",
+        "1000mg"
+      ],
+      "class": "Anticonvulsant"
+    },
+    {
+      "brand": "Encorate",
+      "generic": "Sodium valproate",
+      "strengths": [
+        "200mg",
+        "300mg",
+        "500mg"
+      ],
+      "class": "Anticonvulsant"
+    },
+    {
+      "brand": "Nexito",
+      "generic": "Escitalopram",
+      "strengths": [
+        "5mg",
+        "10mg",
+        "20mg"
+      ],
+      "class": "SSRI"
+    },
+    {
+      "brand": "Prodep",
+      "generic": "Fluoxetine",
+      "strengths": [
+        "10mg",
+        "20mg"
+      ],
+      "class": "SSRI"
+    },
+    {
+      "brand": "Alprax",
+      "generic": "Alprazolam",
+      "strengths": [
+        "0.25mg",
+        "0.5mg",
+        "1mg"
+      ],
+      "class": "Benzodiazepine"
+    },
+    {
+      "brand": "Restyl",
+      "generic": "Alprazolam",
+      "strengths": [
+        "0.25mg",
+        "0.5mg",
+        "1mg"
+      ],
+      "class": "Benzodiazepine"
+    },
+    {
+      "brand": "Etizola",
+      "generic": "Etizolam",
+      "strengths": [
+        "0.25mg",
+        "0.5mg",
+        "1mg"
+      ],
+      "class": "Thienodiazepine"
+    },
+    {
+      "brand": "Vasograin",
+      "generic": "Ergotamine + Caffeine + Paracetamol",
+      "strengths": [],
+      "class": "Antimigraine"
+    },
+    {
+      "brand": "Naxdom",
+      "generic": "Naproxen + Domperidone",
+      "strengths": [
+        "250mg",
+        "500mg"
+      ],
+      "class": "Antimigraine"
+    },
+    {
+      "brand": "Sibelium",
+      "generic": "Flunarizine",
+      "strengths": [
+        "5mg",
+        "10mg"
+      ],
+      "class": "Antimigraine prophylaxis"
+    },
+    {
+      "brand": "Stemetil",
+      "generic": "Prochlorperazine",
+      "strengths": [
+        "5mg"
+      ],
+      "class": "Antivertigo"
+    },
+    {
+      "brand": "Vertin",
+      "generic": "Betahistine",
+      "strengths": [
+        "8mg",
+        "16mg",
+        "24mg"
+      ],
+      "class": "Antivertigo"
+    },
+    {
+      "brand": "Zyloric",
+      "generic": "Allopurinol",
+      "strengths": [
+        "100mg",
+        "300mg"
+      ],
+      "class": "Xanthine oxidase inhibitor"
+    },
+    {
+      "brand": "Febustat",
+      "generic": "Febuxostat",
+      "strengths": [
+        "40mg",
+        "80mg"
+      ],
+      "class": "Xanthine oxidase inhibitor"
+    },
+    {
+      "brand": "Folitrax",
+      "generic": "Methotrexate",
+      "strengths": [
+        "2.5mg",
+        "7.5mg",
+        "10mg",
+        "15mg"
+      ],
+      "class": "DMARD"
+    },
+    {
+      "brand": "Lubrijoint",
+      "generic": "Glucosamine + Chondroitin",
+      "strengths": [],
+      "class": "Cartilage supplement"
+    },
+    {
+      "brand": "Cartigen",
+      "generic": "Glucosamine",
+      "strengths": [
+        "500mg",
+        "750mg"
+      ],
+      "class": "Cartilage supplement"
+    },
+    {
+      "brand": "Wysolone",
+      "generic": "Prednisolone",
+      "strengths": [
+        "5mg",
+        "10mg",
+        "20mg",
+        "40mg"
+      ],
+      "class": "Corticosteroid"
+    },
+    {
+      "brand": "Omnacortil",
+      "generic": "Prednisolone",
+      "strengths": [
+        "5mg",
+        "10mg",
+        "20mg"
+      ],
+      "class": "Corticosteroid"
+    },
+    {
+      "brand": "Medrol",
+      "generic": "Methylprednisolone",
+      "strengths": [
+        "4mg",
+        "8mg",
+        "16mg"
+      ],
+      "class": "Corticosteroid"
+    },
+    {
+      "brand": "Urimax",
+      "generic": "Tamsulosin",
+      "strengths": [
+        "0.2mg",
+        "0.4mg"
+      ],
+      "class": "Alpha blocker"
+    },
+    {
+      "brand": "Urimax-D",
+      "generic": "Tamsulosin + Dutasteride",
+      "strengths": [
+        "0.4mg"
+      ],
+      "class": "BPH combination"
+    },
+    {
+      "brand": "Nefrosave",
+      "generic": "N-acetylcysteine + Taurine",
+      "strengths": [],
+      "class": "Renal supplement"
+    },
+    {
+      "brand": "Sompraz",
+      "generic": "Esomeprazole",
+      "strengths": [
+        "20mg",
+        "40mg"
+      ],
+      "class": "Proton pump inhibitor"
+    },
+    {
+      "brand": "Cremalax",
+      "generic": "Sodium picosulfate",
+      "strengths": [
+        "5mg",
+        "10mg"
+      ],
+      "class": "Stimulant laxative"
+    },
+    {
+      "brand": "Dulcolax",
+      "generic": "Bisacodyl",
+      "strengths": [
+        "5mg",
+        "10mg"
+      ],
+      "class": "Stimulant laxative"
+    },
+    {
+      "brand": "Looz",
+      "generic": "Lactulose",
+      "strengths": [],
+      "class": "Osmotic laxative"
+    },
+    {
+      "brand": "Nurokind-LC",
+      "generic": "Mecobalamin + L-Carnitine",
+      "strengths": [],
+      "class": "Neurotropic vitamin"
+    },
+    {
+      "brand": "Rejunex",
+      "generic": "Mecobalamin complex",
+      "strengths": [],
+      "class": "Neurotropic vitamin"
+    }
+  ]
+}

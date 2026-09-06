@@ -101,6 +101,15 @@ class ExtractedMedicationItem(BaseModel):
     status: Literal["reliable", "needs_clarification", "uncertain", "verified_by_patient", "escalated_to_staff"] = "reliable"
     unreliableFields: List[str] = Field(default_factory=list)
     cropUrl: Optional[str] = None
+    # Formulary grounding: whether this reading corresponds to a real marketed
+    # product, and the generic the DDI rules need in order to see it at all.
+    verificationStatus: Literal["verified", "corrected", "unverified", "not_checked"] = "not_checked"
+    matchedBrand: Optional[str] = None
+    genericName: Optional[str] = None
+    drugClass: Optional[str] = None
+    strengthPlausible: Optional[bool] = None
+    formularyCandidates: List[str] = Field(default_factory=list)
+    verificationNotes: List[str] = Field(default_factory=list)
 
 class MedicationClarificationPlan(BaseModel):
     shouldAskPatient: bool = False
@@ -164,7 +173,9 @@ class PriorInvestigation(BaseModel):
     timestamp: str
     imageUrl: Optional[str] = None
     status: Literal["success", "needs_review", "failed"] = "success"
-    extractionSource: Literal["vision_llm", "local_ocr_fallback", "sample_curated", "manual_correction"] = "sample_curated"
+    # "extraction_failed" is distinct from a low-confidence read: nothing was
+    # extracted at all, and the caller must not treat the payload as content.
+    extractionSource: Literal["vision_llm", "local_ocr_fallback", "sample_curated", "manual_correction", "extraction_failed"] = "sample_curated"
     clarificationStatus: Literal["not_needed", "in_progress", "completed", "escalated_to_staff"] = "not_needed"
 
 class DocumentManualCorrectionRequest(BaseModel):
@@ -428,6 +439,124 @@ class ConnectivityUpdateRequest(BaseModel):
     status: Literal["online", "degraded", "offline"]
     failCount: int = 0
     clientTimestamp: str
+
+# --- Doctor Identity, Privileges & Duty Models ---
+# Duty state is deliberately richer than free/busy: emergency dispatch needs to
+# know whether a doctor can be interrupted, not merely whether they are idle.
+DutyState = Literal["available", "on_rounds", "in_procedure", "off_duty"]
+
+class DoctorAccount(BaseModel):
+    doctorId: str
+    username: str
+    fullName: str
+    title: str
+    department: str
+    departmentCode: str
+    registrationNumber: str          # NMC / state medical council registration
+    privileges: List[str] = Field(default_factory=list)
+    roomNumber: str = ""
+    floorLocation: str = ""
+
+class DoctorDutyStatus(BaseModel):
+    doctorId: str
+    dutyState: DutyState = "off_duty"
+    onShift: bool = False
+    shiftStart: str = ""             # "HH:MM" local hospital time
+    shiftEnd: str = ""
+    onCall: bool = False
+    interruptible: bool = True       # False while in_procedure
+    activeCaseCount: int = 0
+    acuityLoad: float = 0.0          # cumulative acuity-weighted load this shift
+
+class DoctorLoginRequest(BaseModel):
+    username: str
+    password: str
+
+class DoctorLoginResponse(BaseModel):
+    token: str
+    doctor: DoctorAccount
+    duty: DoctorDutyStatus
+
+class DoctorDutyUpdateRequest(BaseModel):
+    dutyState: DutyState
+    note: Optional[str] = ""
+
+# --- Emergency Dispatch Models ---
+# Emergency assignment is not "find a free doctor". It is meeting a clinical
+# deadline using a scarce, non-interchangeable, reusable resource, deciding now
+# without knowing what arrives next.
+class DispatchDeadline(BaseModel):
+    label: str                       # e.g. "Door-to-balloon"
+    targetMinutes: int
+    anchor: Literal["arrival", "onset"] = "arrival"
+    elapsedMinutes: int = 0          # already spent before dispatch
+    remainingMinutes: int = 0
+    breached: bool = False
+    basis: str = ""                  # how elapsed time was established
+
+class DispatchCandidate(BaseModel):
+    doctorId: str
+    fullName: str
+    title: str
+    department: str
+    roomNumber: str
+    dutyState: str
+    feasible: bool
+    exclusionReason: Optional[str] = None
+    travelMinutes: int = 0
+    projectedMinutesToDoctor: int = 0
+    meetsDeadline: bool = False
+    activeCaseCount: int = 0
+    acuityLoad: float = 0.0
+    scarcityPenalty: float = 0.0
+    score: float = 0.0               # lower is better
+    reasoning: List[str] = Field(default_factory=list)
+
+class DispatchProposal(BaseModel):
+    sessionId: str
+    condition: str
+    requiredPrivilege: str
+    preferredDepartment: str
+    acuityWeight: float
+    deadline: DispatchDeadline
+    proposed: Optional[DispatchCandidate] = None
+    alternatives: List[DispatchCandidate] = Field(default_factory=list)
+    excluded: List[DispatchCandidate] = Field(default_factory=list)
+    escalation: List[str] = Field(default_factory=list)
+    rationale: str = ""
+    generatedAt: str = ""
+
+# Assignment is automatic; accountability comes from the receiving doctor
+# accepting, not from a third party approving. A decline reassigns immediately
+# and its reason is kept -- it is ground truth the roster does not have.
+class DispatchOffer(BaseModel):
+    doctorId: str
+    doctorName: str
+    offeredAt: str
+    respondBySeconds: int
+    status: Literal["pending", "accepted", "declined", "expired"] = "pending"
+    declineReason: Optional[str] = None
+    respondedAt: Optional[str] = None
+    reasoning: List[str] = Field(default_factory=list)
+
+class DispatchRecord(BaseModel):
+    sessionId: str
+    condition: str
+    requiredPrivilege: str
+    acuityWeight: float = 3.0
+    deadline: Optional[DispatchDeadline] = None
+    status: Literal["pending", "accepted", "escalated"] = "pending"
+    currentOffer: Optional[DispatchOffer] = None
+    history: List[DispatchOffer] = Field(default_factory=list)
+    declinedDoctorIds: List[str] = Field(default_factory=list)
+    acceptedByDoctorId: Optional[str] = None
+    acceptedByName: Optional[str] = None
+    acceptedAt: Optional[str] = None
+    escalation: List[str] = Field(default_factory=list)
+    rationale: str = ""
+
+class DispatchDeclineRequest(BaseModel):
+    reason: str
 
 # --- Physician Review Models ---
 class PhysicianSectionReviewRequest(BaseModel):

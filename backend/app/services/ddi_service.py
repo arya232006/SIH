@@ -141,6 +141,24 @@ class DDIService:
                     if name:
                         extracted_drugs.append(name)
 
+        # Rules below are written in generic names, so a prescription recorded
+        # only as "Tab Telma 40" matches nothing. Attach each brand's generic
+        # from the formulary; the brand is kept so alerts still name what the
+        # patient was actually given.
+        # Enriched in place, not appended: adding the generic as a second entry
+        # would make the pairwise sweep compare a drug against itself under two
+        # names and invent interactions.
+        from app.services.formulary_service import formulary_service
+        enriched: List[str] = []
+        for brand in extracted_drugs:
+            check = formulary_service.verify(brand)
+            if check.generic and check.status in ("verified", "corrected") \
+                    and check.generic.lower() not in brand.lower():
+                enriched.append(f"{brand} [{check.generic}]")
+            else:
+                enriched.append(brand)
+        extracted_drugs = enriched
+
         # The same drug often arrives from both sources; de-duplicate so it is not
         # paired against itself in the interaction sweep below.
         _seen: set = set()

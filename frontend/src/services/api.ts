@@ -1,12 +1,15 @@
-import { 
-  PatientRegistration, PatientSession, AdaptiveQuestion, 
+import {
+  PatientRegistration, PatientSession, AdaptiveQuestion,
   RedFlag, PriorInvestigation, ConnectivityStatus, StaffAccount,
-  AudioTranscriptionResponse, CDSSResponse 
+  AudioTranscriptionResponse, CDSSResponse,
+  DoctorAccount, DoctorDutyStatus, DutyState
 } from '../types';
 
 const API_BASE = '/api';
 const STAFF_TOKEN_KEY = 'medikiosk_staff_token';
 const STAFF_ACCOUNT_KEY = 'medikiosk_staff_account';
+const DOCTOR_TOKEN_KEY = 'medikiosk_doctor_token';
+const DOCTOR_ACCOUNT_KEY = 'medikiosk_doctor_account';
 
 export class ApiService {
   private static connectivityFailures = 0;
@@ -34,6 +37,40 @@ export class ApiService {
   static clearStaffAuth() {
     localStorage.removeItem(STAFF_TOKEN_KEY);
     localStorage.removeItem(STAFF_ACCOUNT_KEY);
+  }
+
+  // --- Doctor Token Storage Helpers ---
+  static setDoctorAuth(token: string, doctor: DoctorAccount) {
+    localStorage.setItem(DOCTOR_TOKEN_KEY, token);
+    localStorage.setItem(DOCTOR_ACCOUNT_KEY, JSON.stringify(doctor));
+  }
+
+  static getDoctorToken(): string | null {
+    return localStorage.getItem(DOCTOR_TOKEN_KEY);
+  }
+
+  static getDoctorAccount(): DoctorAccount | null {
+    const raw = localStorage.getItem(DOCTOR_ACCOUNT_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  static clearDoctorAuth() {
+    localStorage.removeItem(DOCTOR_TOKEN_KEY);
+    localStorage.removeItem(DOCTOR_ACCOUNT_KEY);
+  }
+
+  /** Authorization header for the signed-in doctor, if any. */
+  private static doctorHeaders(withJson = false): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (withJson) headers['Content-Type'] = 'application/json';
+    const token = this.getDoctorToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
   }
 
   private static async handleResponse<T>(res: Response): Promise<T> {
@@ -276,7 +313,7 @@ export class ApiService {
 
   // --- Emergency Casualty Dashboard ---
   static async getEmergencyQueue(): Promise<PatientSession[]> {
-    const res = await fetch(`${API_BASE}/emergency/queue`);
+    const res = await fetch(`${API_BASE}/emergency/queue`, { headers: this.doctorHeaders() });
     return this.handleResponse<PatientSession[]>(res);
   }
 
@@ -289,27 +326,90 @@ export class ApiService {
   ): Promise<any> {
     const res = await fetch(`${API_BASE}/emergency/session/${sessionId}/action`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.doctorHeaders(true),
       body: JSON.stringify({ action, assignedBed, notes, dispatchedBy })
     });
     return this.handleResponse(res);
   }
 
-  // --- Physician Dashboard ---
+  // --- Doctor Portal (Authenticated) ---
+  static async doctorLogin(
+    username: string,
+    password: string
+  ): Promise<{ token: string; doctor: DoctorAccount; duty: DoctorDutyStatus }> {
+    const res = await fetch(`${API_BASE}/doctor/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await this.handleResponse<{
+      token: string; doctor: DoctorAccount; duty: DoctorDutyStatus;
+    }>(res);
+    this.setDoctorAuth(data.token, data.doctor);
+    return data;
+  }
+
+  static async doctorLogout(): Promise<void> {
+    try {
+      await fetch(`${API_BASE}/doctor/logout`, {
+        method: 'POST',
+        headers: this.doctorHeaders()
+      });
+    } catch {
+      // Clearing local credentials matters more than the server round-trip.
+    }
+    this.clearDoctorAuth();
+  }
+
+  static async getDoctorProfile(): Promise<{ doctor: DoctorAccount; duty: DoctorDutyStatus }> {
+    const res = await fetch(`${API_BASE}/doctor/me`, { headers: this.doctorHeaders() });
+    return this.handleResponse(res);
+  }
+
+  static async setDoctorDuty(dutyState: DutyState, note = ''): Promise<{ duty: DoctorDutyStatus }> {
+    const res = await fetch(`${API_BASE}/doctor/duty`, {
+      method: 'POST',
+      headers: this.doctorHeaders(true),
+      body: JSON.stringify({ dutyState, note })
+    });
+    return this.handleResponse(res);
+  }
+
+  static async getDoctorRoster(): Promise<{ doctor: DoctorAccount; duty: DoctorDutyStatus }[]> {
+    const res = await fetch(`${API_BASE}/doctor/roster`, { headers: this.doctorHeaders() });
+    return this.handleResponse(res);
+  }
+
+  static async getAvailableDoctors(params: {
+    department?: string; privilege?: string; includeInterrupted?: boolean;
+  } = {}): Promise<DoctorAccount[]> {
+    const query = new URLSearchParams();
+    if (params.department) query.set('department', params.department);
+    if (params.privilege) query.set('privilege', params.privilege);
+    if (params.includeInterrupted) query.set('includeInterrupted', 'true');
+    const res = await fetch(`${API_BASE}/doctor/available?${query.toString()}`, {
+      headers: this.doctorHeaders()
+    });
+    return this.handleResponse<DoctorAccount[]>(res);
+  }
+
+  // --- Physician Dashboard (Authenticated as the signed-in doctor) ---
   static async getPhysicianQueue(): Promise<any[]> {
-    const res = await fetch(`${API_BASE}/physician/queue`);
+    const res = await fetch(`${API_BASE}/physician/queue`, { headers: this.doctorHeaders() });
     return this.handleResponse<any[]>(res);
   }
 
   static async getPhysicianSession(sessionId: string): Promise<PatientSession> {
-    const res = await fetch(`${API_BASE}/physician/session/${sessionId}`);
+    const res = await fetch(`${API_BASE}/physician/session/${sessionId}`, {
+      headers: this.doctorHeaders()
+    });
     return this.handleResponse<PatientSession>(res);
   }
 
   static async reviewSection(sessionId: string, payload: any): Promise<any> {
     const res = await fetch(`${API_BASE}/physician/session/${sessionId}/review`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.doctorHeaders(true),
       body: JSON.stringify(payload)
     });
     return this.handleResponse(res);
@@ -317,14 +417,16 @@ export class ApiService {
 
   static async getClinicalDecisionSupport(sessionId: string): Promise<CDSSResponse> {
     const res = await fetch(`${API_BASE}/physician/session/${sessionId}/clinical-decision-support`, {
-      method: 'POST'
+      method: 'POST',
+      headers: this.doctorHeaders()
     });
     return this.handleResponse<CDSSResponse>(res);
   }
 
   static async savePhysicianRecord(sessionId: string): Promise<any> {
     const res = await fetch(`${API_BASE}/physician/session/${sessionId}/save-record`, {
-      method: 'POST'
+      method: 'POST',
+      headers: this.doctorHeaders()
     });
     return this.handleResponse(res);
   }

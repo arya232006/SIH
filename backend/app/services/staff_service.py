@@ -97,9 +97,27 @@ class StaffService:
         self._active_connections.discard(websocket)
 
     async def broadcast_event(self, event_type: str, data: dict):
-        """Broadcasts real-time events to all connected staff dashboards."""
+        """
+        Records a fact on the shared event log.
+
+        This used to push straight to the websockets and nothing else, so a fact
+        existed only for whoever happened to be connected. It now appends to the
+        log, and the websocket fan-out below is one subscriber among many --
+        bed management and the other policies see the same facts without being
+        wired into every call site that might produce one.
+        """
+        from app.services.event_log import event_log
+        await event_log.emit(
+            type=event_type,
+            payload=data,
+            actor=data.get("actor", "system"),
+            sessionId=data.get("sessionId"),
+        )
+
+    async def push_to_dashboards(self, event) -> None:
+        """Websocket fan-out, subscribed to the event log at startup."""
         dead_connections = set()
-        message = json.dumps({"type": event_type, "data": data})
+        message = json.dumps({"type": event.type, "data": event.payload})
         for ws in self._active_connections:
             try:
                 await ws.send_text(message)

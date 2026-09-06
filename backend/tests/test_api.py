@@ -9,6 +9,16 @@ from app.store import SessionStore
 
 client = TestClient(app)
 
+
+def doctor_auth():
+    """Bearer header for a signed-in doctor. Physician and emergency routes
+    expose identifiable clinical records and now require one."""
+    res = client.post("/api/doctor/login",
+                      json={"username": "dr_khan", "password": "emerg123"})
+    assert res.status_code == 200
+    return {"Authorization": f"Bearer {res.json()['token']}"}
+
+
 def test_healthz():
     response = client.get("/api/healthz")
     assert response.status_code == 200
@@ -289,7 +299,7 @@ def test_staff_authentication_takeover_and_conflict():
 
 def test_physician_queue_review_and_sqlite_persistence():
     # 1. Get Physician Queue
-    queue_resp = client.get("/api/physician/queue")
+    queue_resp = client.get("/api/physician/queue", headers=doctor_auth())
     assert queue_resp.status_code == 200
     queue = queue_resp.json()
     assert len(queue) >= 1
@@ -297,7 +307,7 @@ def test_physician_queue_review_and_sqlite_persistence():
 
     # 2. Get Detail & Save Amendment
     s_id = queue[0]["sessionId"]
-    rev_resp = client.post(f"/api/physician/session/{s_id}/review", json={
+    rev_resp = client.post(f"/api/physician/session/{s_id}/review", headers=doctor_auth(), json={
         "sectionReviews": {"chiefComplaint": "amended", "historyOfPresentIllness": "accepted"},
         "amendedData": {"chiefComplaint": "Acute Coronary Syndrome (Verified by Emergency Triage MO)"},
         "physicianNotes": "Urgent 12-lead ECG confirmed STEMI. Shifted to Cath Lab immediately.",
@@ -308,7 +318,7 @@ def test_physician_queue_review_and_sqlite_persistence():
     assert updated_sess["fieldProvenance"]["chiefComplaint"] == "physician-amended"
 
     # 3. Save Record to EHR
-    save_resp = client.post(f"/api/physician/session/{s_id}/save-record")
+    save_resp = client.post(f"/api/physician/session/{s_id}/save-record", headers=doctor_auth())
     assert save_resp.status_code == 200
     assert save_resp.json()["status"] == "saved"
 
@@ -396,7 +406,7 @@ def test_clinical_decision_support_endpoint():
         "field": "chief_complaint"
     })
 
-    cdss_cv = client.post(f"/api/physician/session/{s_cv}/clinical-decision-support")
+    cdss_cv = client.post(f"/api/physician/session/{s_cv}/clinical-decision-support", headers=doctor_auth())
     assert cdss_cv.status_code == 200
     data_cv = cdss_cv.json()
     assert len(data_cv["differentialDiagnoses"]) > 0
@@ -415,7 +425,7 @@ def test_clinical_decision_support_endpoint():
         "field": "chief_complaint"
     })
 
-    cdss_gi = client.post(f"/api/physician/session/{s_gi}/clinical-decision-support")
+    cdss_gi = client.post(f"/api/physician/session/{s_gi}/clinical-decision-support", headers=doctor_auth())
     assert cdss_gi.status_code == 200
     data_gi = cdss_gi.json()
     assert any("GERD" in d["condition"] or "Gastritis" in d["condition"] for d in data_gi["differentialDiagnoses"])
@@ -440,7 +450,7 @@ def test_emergency_casualty_queue_and_actions():
     })
 
     # Fetch emergency queue
-    emg_queue_resp = client.get("/api/emergency/queue")
+    emg_queue_resp = client.get("/api/emergency/queue", headers=doctor_auth())
     assert emg_queue_resp.status_code == 200
     queue = emg_queue_resp.json()
     assert len(queue) > 0
@@ -457,6 +467,7 @@ def test_emergency_casualty_queue_and_actions():
     # 3. Trigger Emergency Action: Bed assignment & Stat ECG
     action_resp = client.post(
         f"/api/emergency/session/{s_emg}/action",
+        headers=doctor_auth(),
         json={
             "action": "Stat 12-Lead ECG & Trop-I",
             "assignedBed": "Trauma Bay 1 (Critical)",
@@ -596,7 +607,7 @@ def test_homeopathy_system_intake_routing_and_cdss():
     assert "Dr. S. K. Roy" in sess_data["departmentRouting"]["doctorName"]
 
     # Verify Homeopathic CDSS Recommendations & Potency
-    cdss_resp = client.post(f"/api/physician/session/{s_id}/cdss")
+    cdss_resp = client.post(f"/api/physician/session/{s_id}/cdss", headers=doctor_auth())
     assert cdss_resp.status_code == 200
     cdss = cdss_resp.json()
     assert len(cdss["differentialDiagnoses"]) > 0

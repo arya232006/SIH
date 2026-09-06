@@ -23,7 +23,9 @@ from app.models import (
     MedicationClarificationAnswerRequest, MedicationClarificationAnswerResponse,
     ExtractedMedicationItem, PainAssessment, SafetyCheckResponse,
     TriageAcuityScore, PrescriptionOrder, PrescriptionItem, FHIRBundleResponse,
-    PrescriptionGenerateRequest, HistoryOfPresentIllness, DrugAllergyHistory
+    PrescriptionGenerateRequest, HistoryOfPresentIllness, DrugAllergyHistory,
+    DoctorAccount, DoctorLoginRequest, DoctorLoginResponse, DoctorDutyUpdateRequest,
+    DispatchProposal, DispatchRecord, DispatchDeclineRequest
 )
 from app.store import session_store
 from app.services.red_flag_service import red_flag_detector
@@ -31,6 +33,9 @@ from app.services.llm_service import llm_service
 from app.services.routing_service import routing_service
 from app.services.ocr_service import ocr_service, SAMPLE_DOCS_DIR, UPLOADS_DIR
 from app.services.staff_service import staff_service
+from app.services.doctor_service import doctor_service
+from app.services.dispatch_service import dispatch_service
+from app.services.dispatch_simulation import DispatchSimulation
 from app.services.audio_service import audio_service
 from app.services.medication_clarification_service import MedicationClarificationService
 from app.services.ddi_service import DDIService
@@ -38,8 +43,23 @@ from app.services.triage_service import TriageService
 from app.services.fhir_service import FHIRService
 from app.services.drug_matching_service import DrugMatchingService
 
+from app.services.event_log import event_log
+from app.services.bed_service import bed_service
+
 # Ensure sample images exist on disk on startup
 ocr_service.ensure_sample_images_exist()
+
+# --- Wire the policies onto the shared event log -------------------------
+# Each policy joins by subscribing rather than by being called. Bed management
+# needed no change to dispatch, to the emergency endpoints, or to the kiosk --
+# it subscribes to the fact that a doctor accepted a case and reacts. The
+# websocket fan-out is now one subscriber among several rather than the
+# transport itself, so a dashboard being disconnected loses nothing.
+event_log.subscribe("*", staff_service.push_to_dashboards, "staff_dashboards")
+event_log.subscribe("emergency_dispatch_accepted", bed_service.on_dispatch_accepted,
+                    "bed_management")
+event_log.subscribe("physician_record_saved", bed_service.on_record_completed,
+                    "bed_release")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -72,6 +92,22 @@ async def get_current_staff(authorization: Optional[str] = Header(None)) -> Staf
             detail="Invalid or expired staff token."
         )
     return staff
+
+# --- Doctor Auth Dependency ---
+async def get_current_doctor(authorization: Optional[str] = Header(None)) -> DoctorAccount:
+    """Verifies Bearer token for protected doctor routes."""
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Doctor authentication token required. Please sign in."
+        )
+    doctor = doctor_service.verify_token(authorization)
+    if not doctor:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired doctor token."
+        )
+    return doctor
 
 # --- Health Check ---
 @app.get("/api/healthz")
@@ -811,6 +847,291 @@ async def staff_login(req: StaffLoginRequest):
         "staff": account
     }
 
+# --- DOCTOR PORTAL ENDPOINTS ---
+
+@app.post("/api/doctor/login", response_model=DoctorLoginResponse)
+async def doctor_login(req: DoctorLoginRequest):
+    """Authenticates a registered doctor and returns their token and duty state."""
+    auth_result = doctor_service.authenticate(req.username, req.password)
+    if not auth_result:
+        raise HTTPException(status_code=401, detail="Invalid doctor username or password")
+    token, account = auth_result
+    return DoctorLoginResponse(
+        token=token,
+        doctor=account,
+        duty=doctor_service.get_duty(account.doctorId)
+    )
+
+@app.post("/api/doctor/logout")
+async def doctor_logout(authorization: Optional[str] = Header(None)):
+    """Invalidates the caller's doctor token."""
+    if authorization:
+        doctor_service.logout_token(authorization)
+    return {"status": "logged_out"}
+
+@app.get("/api/doctor/me")
+async def get_current_doctor_profile(doctor: DoctorAccount = Depends(get_current_doctor)):
+    """Returns the signed-in doctor's profile and live duty state."""
+    return {"doctor": doctor, "duty": doctor_service.get_duty(doctor.doctorId)}
+
+@app.post("/api/doctor/duty")
+async def update_doctor_duty(
+    req: DoctorDutyUpdateRequest,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    Doctor reports their own availability. 'in_procedure' marks them
+    uninterruptible, which emergency dispatch must respect.
+    """
+    duty = doctor_service.set_duty_state(doctor.doctorId, req.dutyState)
+    if duty is None:
+        raise HTTPException(status_code=404, detail="Duty record not found for this doctor")
+    await staff_service.broadcast_event("doctor_duty_changed", {
+        "doctorId": doctor.doctorId,
+        "fullName": doctor.fullName,
+        "department": doctor.department,
+        "dutyState": duty.dutyState,
+        "interruptible": duty.interruptible,
+        "note": req.note or ""
+    })
+    return {"status": "duty_updated", "duty": duty}
+
+@app.get("/api/doctor/roster")
+async def get_doctor_roster(doctor: DoctorAccount = Depends(get_current_doctor)):
+    """Full doctor roster with live shift and duty state."""
+    return doctor_service.roster()
+
+@app.get("/api/doctor/available")
+async def get_available_doctors(
+    department: Optional[str] = Query(None),
+    privilege: Optional[str] = Query(None),
+    includeInterrupted: bool = Query(False),
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    Assignment candidates: on shift and holding the required privilege.
+    Set includeInterrupted when no doctor is idle and a clinical deadline is close.
+    """
+    return doctor_service.available_doctors(
+        department=department,
+        privilege=privilege,
+        include_interrupted=includeInterrupted
+    )
+
+# --- EMERGENCY DISPATCH ENDPOINTS ---
+
+@app.get("/api/dispatch/session/{session_id}/proposal", response_model=DispatchProposal)
+async def get_dispatch_proposal(
+    session_id: str,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    Proposes which doctor should take this emergency, with the reasoning behind
+    it and the escalation ladder if the clinical deadline cannot be met.
+
+    This never assigns anyone. Unattended emergency assignment is not something
+    a rule engine should do alone -- a duty officer confirms via /confirm.
+    """
+    session = session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return dispatch_service.propose(session)
+
+def _require_session(session_id: str):
+    session = session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return session
+
+@app.post("/api/dispatch/session/{session_id}/dispatch", response_model=DispatchRecord)
+async def dispatch_emergency(
+    session_id: str,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    Assigns the case automatically and pages the best candidate. No third party
+    approves it: the receiving doctor accepts, and accountability sits with them.
+    Idempotent -- calling again returns the live record.
+    """
+    session = _require_session(session_id)
+    record = dispatch_service.dispatch(session)
+
+    if record.currentOffer:
+        session.emergencyActionLog.append(
+            f"[{datetime.now().strftime('%H:%M:%S')}] Auto-assigned to "
+            f"{record.currentOffer.doctorName} for {record.condition}, "
+            f"awaiting acceptance ({record.currentOffer.respondBySeconds}s)"
+        )
+        session_store.update_session(session_id, session)
+        await staff_service.broadcast_event("emergency_dispatch_offered", {
+            "sessionId": session_id,
+            "tokenNumber": session.tokenNumber,
+            "patientName": session.patientName,
+            "doctorId": record.currentOffer.doctorId,
+            "doctorName": record.currentOffer.doctorName,
+            "condition": record.condition,
+            "respondBySeconds": record.currentOffer.respondBySeconds
+        })
+    return record
+
+@app.get("/api/dispatch/session/{session_id}", response_model=DispatchRecord)
+async def get_dispatch_record(
+    session_id: str,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """Live dispatch state. Unanswered offers expire on read and roll onward."""
+    session = _require_session(session_id)
+    record = dispatch_service.record_for(session_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="No dispatch record for this session")
+    return dispatch_service.sweep(session)
+
+@app.post("/api/dispatch/session/{session_id}/accept", response_model=DispatchRecord)
+async def accept_dispatch(
+    session_id: str,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """The paged doctor takes the case, and owns it from here."""
+    session = _require_session(session_id)
+    try:
+        record = dispatch_service.accept(session, doctor)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    session.emergencyActionLog.append(
+        f"[{record.acceptedAt}] {record.acceptedByName} accepted "
+        f"{record.condition}"
+    )
+    session.fieldProvenance["dispatchAssignment"] = "doctor-accepted"
+    session_store.update_session(session_id, session)
+
+    await staff_service.broadcast_event("emergency_dispatch_accepted", {
+        "sessionId": session_id,
+        "tokenNumber": session.tokenNumber,
+        "patientName": session.patientName,
+        "doctorId": record.acceptedByDoctorId,
+        "doctorName": record.acceptedByName,
+        "condition": record.condition,
+        # Bed allocation reads acuity off this event -- it never calls dispatch.
+        "acuityWeight": record.acuityWeight,
+        "actor": f"doctor:{record.acceptedByDoctorId}",
+    })
+    return record
+
+@app.post("/api/dispatch/session/{session_id}/decline", response_model=DispatchRecord)
+async def decline_dispatch(
+    session_id: str,
+    req: DispatchDeclineRequest,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    The paged doctor cannot take it. The case rolls straight to the next
+    candidate; the reason is kept because it is ground truth the roster lacks.
+    """
+    session = _require_session(session_id)
+    try:
+        record = dispatch_service.decline(session, doctor, req.reason)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    session.emergencyActionLog.append(
+        f"[{datetime.now().strftime('%H:%M:%S')}] {doctor.fullName} declined "
+        f"({req.reason})"
+    )
+    session_store.update_session(session_id, session)
+
+    await staff_service.broadcast_event("emergency_dispatch_declined", {
+        "sessionId": session_id,
+        "declinedBy": doctor.fullName,
+        "reason": req.reason,
+        "reofferedTo": record.currentOffer.doctorName if record.currentOffer else None,
+        "escalated": record.status == "escalated"
+    })
+    return record
+
+@app.get("/api/doctor/inbox")
+async def get_doctor_dispatch_inbox(
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """Emergency cases currently paged to the signed-in doctor."""
+    for record in list(dispatch_service._records.values()):
+        session = session_store.get_session(record.sessionId)
+        if session:
+            dispatch_service.sweep(session)
+    return dispatch_service.offers_for_doctor(doctor.doctorId)
+
+@app.get("/api/dispatch/benchmark")
+async def benchmark_dispatch_policies(
+    cases: int = Query(60, ge=10, le=500),
+    seed: int = Query(42),
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    Runs an identical stream of emergency arrivals through competing dispatch
+    policies so the deadline-aware policy can be compared against the obvious
+    alternatives rather than merely asserted. Deterministic for a given seed.
+    """
+    return {
+        "cases": cases,
+        "seed": seed,
+        "results": DispatchSimulation(seed=seed).compare(count=cases)
+    }
+
+# --- EVENT LOG & BED MANAGEMENT ---
+
+@app.get("/api/events")
+async def get_event_log(
+    sessionId: Optional[str] = Query(None),
+    type: Optional[str] = Query(None, description="exact, or a prefix like 'bed.*'"),
+    since: int = Query(0, description="return events after this sequence number"),
+    limit: int = Query(100, ge=1, le=1000),
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    The hospital's ordered record of what happened. Every policy decision, its
+    actor, and the event that caused it -- which is what makes the autonomous
+    parts auditable rather than merely fast.
+    """
+    if sessionId:
+        events = event_log.for_session(sessionId)
+    elif type:
+        events = event_log.of_type(type)
+    elif since:
+        events = event_log.since(since, limit)
+    else:
+        events = event_log.all(limit)
+    return {"count": len(events), "events": [e.to_dict() for e in events[-limit:]]}
+
+@app.get("/api/events/{event_id}/why")
+async def explain_event(
+    event_id: str,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """Walks causedBy back to the originating fact: why did this happen?"""
+    chain = event_log.causal_chain(event_id)
+    if not chain:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return {"chain": [e.to_dict() for e in chain]}
+
+@app.get("/api/beds")
+async def get_bed_board(doctor: DoctorAccount = Depends(get_current_doctor)):
+    """Live bed board with occupancy by class."""
+    return bed_service.occupancy()
+
+@app.get("/api/beds/session/{session_id}")
+async def get_bed_allocation(
+    session_id: str,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    allocation = bed_service.allocations.get(session_id)
+    if not allocation:
+        raise HTTPException(status_code=404, detail="No bed allocation for this session")
+    return allocation.to_dict()
+
 @app.get("/api/staff/sessions")
 async def get_staff_sessions(staff: StaffAccount = Depends(get_current_staff)):
     """Returns active kiosk sessions sorted with offline/flagged at the top."""
@@ -967,7 +1288,7 @@ async def assign_patient_department(
 # --- EMERGENCY CASUALTY & RED FLAG TRIAGE ENDPOINTS ---
 
 @app.get("/api/emergency/queue")
-async def get_emergency_queue():
+async def get_emergency_queue(doctor: DoctorAccount = Depends(get_current_doctor)):
     """
     Dedicated stream of active red-flagged patients for Emergency Physicians & Casualty Staff.
     Filters exclusively for triggered emergency red flags.
@@ -975,7 +1296,7 @@ async def get_emergency_queue():
     return session_store.get_emergency_queue()
 
 @app.post("/api/emergency/session/{session_id}/action")
-async def trigger_emergency_action(session_id: str, req: EmergencyActionRequest):
+async def trigger_emergency_action(session_id: str, req: EmergencyActionRequest, doctor: DoctorAccount = Depends(get_current_doctor)):
     """
     Executes rapid emergency actions (e.g. Bed assignment, Code Red dispatch, Stat Lab Orders).
     """
@@ -1014,7 +1335,7 @@ async def trigger_emergency_action(session_id: str, req: EmergencyActionRequest)
 # --- PHYSICIAN DASHBOARD ENDPOINTS ---
 
 @app.get("/api/physician/queue")
-async def get_physician_queue():
+async def get_physician_queue(doctor: DoctorAccount = Depends(get_current_doctor)):
     """Returns patients ready for consultation, prioritized by triage severity."""
     queue = session_store.get_physician_queue()
     for s in queue:
@@ -1033,7 +1354,7 @@ async def get_physician_queue():
     return queue
 
 @app.get("/api/physician/session/{session_id}")
-async def get_physician_session_detail(session_id: str):
+async def get_physician_session_detail(session_id: str, doctor: DoctorAccount = Depends(get_current_doctor)):
     session = session_store.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -1041,7 +1362,7 @@ async def get_physician_session_detail(session_id: str):
     return session
 
 @app.post("/api/physician/session/{session_id}/review")
-async def review_clinical_note(session_id: str, req: PhysicianSectionReviewRequest):
+async def review_clinical_note(session_id: str, req: PhysicianSectionReviewRequest, doctor: DoctorAccount = Depends(get_current_doctor)):
     """
     Physician inline reviews each section with Accept / Amend / Reject controls.
     """
@@ -1079,7 +1400,7 @@ async def review_clinical_note(session_id: str, req: PhysicianSectionReviewReque
 
 @app.post("/api/physician/session/{session_id}/clinical-decision-support", response_model=CDSSResponse)
 @app.post("/api/physician/session/{session_id}/cdss", response_model=CDSSResponse)
-async def get_clinical_decision_support(session_id: str):
+async def get_clinical_decision_support(session_id: str, doctor: DoctorAccount = Depends(get_current_doctor)):
     """
     Generates evidence-based treatment options, differential diagnoses, critical points to notice,
     and recommended investigations to reduce physician stress and cognitive load during OPD review.
@@ -1093,7 +1414,7 @@ async def get_clinical_decision_support(session_id: str):
     return cdss_result
 
 @app.post("/api/physician/session/{session_id}/save-record")
-async def finalize_physician_record(session_id: str):
+async def finalize_physician_record(session_id: str, doctor: DoctorAccount = Depends(get_current_doctor)):
     """
     Doctor finalizes and commits the verified clinical record to the EHR.
     """
@@ -1104,6 +1425,16 @@ async def finalize_physician_record(session_id: str):
     session.status = "completed"
     session.physicianReviewStatus = "Accepted"
     session_store.update_session(session_id, session)
+
+    # Closing the visit is a fact others act on -- bed management frees the bed
+    # off this event rather than being told to.
+    await staff_service.broadcast_event("physician_record_saved", {
+        "sessionId": session.sessionId,
+        "visitId": session.visitId,
+        "tokenNumber": session.tokenNumber,
+        "patientName": session.patientName,
+        "actor": f"doctor:{doctor.doctorId}",
+    })
 
     return {
         "status": "saved",
@@ -1265,3 +1596,62 @@ async def websocket_staff_endpoint(websocket: WebSocket):
         staff_service.disconnect_websocket(websocket)
     except Exception:
         staff_service.disconnect_websocket(websocket)
+
+# --- SERVE THE BUILT FRONTEND (single-service deployment) ---
+# Frontend and backend ship as one service on one origin. The React client calls
+# a relative "/api", which works in development only because Vite proxies it --
+# deployed separately those calls would hit the static host and 404. Serving both
+# from here also removes CORS and keeps the websocket on the same origin.
+
+_FRONTEND_DIST = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "frontend", "dist"
+)
+
+# Client-side routes that must return index.html rather than 404. An explicit
+# list, not a catch-all: a catch-all route would answer every unmatched path,
+# turning genuine 404s into 200s and unknown API methods into 405s.
+_SPA_ROUTES = {"", "kiosk", "physician", "emergency", "staff"}
+
+if os.path.isdir(_FRONTEND_DIST):
+    from fastapi.staticfiles import StaticFiles
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    _assets = os.path.join(_FRONTEND_DIST, "assets")
+    if os.path.isdir(_assets):
+        app.mount("/assets", StaticFiles(directory=_assets), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    async def serve_index():
+        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))
+
+    @app.exception_handler(StarletteHTTPException)
+    async def spa_fallback(request, exc):
+        """
+        Serves the app shell for client-side routes only. /api paths, unknown
+        top-level paths and traversal attempts keep their real status code.
+        """
+        path = request.url.path
+        if exc.status_code == 404 and not path.startswith("/api"):
+            first = path.strip("/").split("/")[0] if path.strip("/") else ""
+            if first in _SPA_ROUTES and ".." not in path:
+                index = os.path.join(_FRONTEND_DIST, "index.html")
+                if os.path.isfile(index):
+                    return FileResponse(index)
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    # Static files that live at the root of the build (favicon, icons, manifest).
+    @app.get("/{filename}", include_in_schema=False)
+    async def serve_root_file(filename: str):
+        candidate = os.path.normpath(os.path.join(_FRONTEND_DIST, filename))
+        if candidate.startswith(_FRONTEND_DIST) and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        raise HTTPException(status_code=404, detail="Not found")
+else:
+    @app.get("/", include_in_schema=False)
+    async def no_frontend_built():
+        return {
+            "service": "MediKiosk API",
+            "docs": "/docs",
+            "note": "Frontend not built. Run 'npm run build' in frontend/ to serve the UI here.",
+        }
