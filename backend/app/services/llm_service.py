@@ -9,6 +9,24 @@ from app.models import (
     DifferentialDiagnosis, SuggestedDrug, CDSSResponse
 )
 
+# Allergy status is clinically tri-state: denied, unknown, or present.
+# Match on whole words only -- an unanchored "no" substring silently inverts real
+# allergies whose drug name happens to contain those letters (Novamox, Norflox,
+# Novalgin) and turns "I don't know" into a confident denial.
+UNCERTAIN_ALLERGY_RE = re.compile(
+    r"\b(don'?t know|do ?not know|not sure|unsure|unknown|can'?t remember|"
+    r"cannot remember|no idea|not aware|never checked|maybe|possibly)\b",
+    re.IGNORECASE,
+)
+DENIED_ALLERGY_RE = re.compile(
+    r"\b(nkda|nil|none|no|nothing|negative)\b|no known|not allergic|denies",
+    re.IGNORECASE,
+)
+ALLERGY_UNKNOWN_TEXT = (
+    "Allergy status UNKNOWN - patient could not confirm. Verify before prescribing."
+)
+
+
 class LLMService:
     """
     Nurse-Grade Adaptive Conversational Clinical Intake Engine for MediKiosk.
@@ -566,7 +584,12 @@ SAFETY RULES:
                     drug_history.currentMedications.append(ans)
                     pertinent_positives.append(f"Current Rx: {ans}")
             elif any(k in f for k in ["allerg", "allergy", "reactions"]):
-                if "no" in ans_lower or "nkda" in ans_lower:
+                # Order matters: uncertainty is checked first, because phrases like
+                # "no idea" would otherwise be read as an allergy denial.
+                if UNCERTAIN_ALLERGY_RE.search(ans):
+                    drug_history.allergies = ALLERGY_UNKNOWN_TEXT
+                    pertinent_positives.append(f"Allergy status unconfirmed: {ans}")
+                elif DENIED_ALLERGY_RE.search(ans):
                     drug_history.allergies = "No known drug allergies (NKDA)"
                     pertinent_negatives.append("No known drug allergies (NKDA)")
                 else:

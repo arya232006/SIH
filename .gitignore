@@ -33,7 +33,10 @@ ENV/
 backend/app/uploads/*
 !backend/app/uploads/.gitkeep
 
-# Database
+# Database (runtime state - tables are created on startup by store._init_sqlite
+# and demo patients are seeded from store._seed_sample_patients)
+*.db
+*.sqlite
 *.sqlite3
 *.db-journal
 

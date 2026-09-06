@@ -23,7 +23,7 @@ from app.models import (
     MedicationClarificationAnswerRequest, MedicationClarificationAnswerResponse,
     ExtractedMedicationItem, PainAssessment, SafetyCheckResponse,
     TriageAcuityScore, PrescriptionOrder, PrescriptionItem, FHIRBundleResponse,
-    PrescriptionGenerateRequest
+    PrescriptionGenerateRequest, HistoryOfPresentIllness, DrugAllergyHistory
 )
 from app.store import session_store
 from app.services.red_flag_service import red_flag_detector

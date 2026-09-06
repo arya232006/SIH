@@ -119,11 +119,19 @@ class DDIService:
 
         extracted_drugs: List[str] = []
         allergy_obj = _get_val(session, "drugAllergyHistory") or {}
-        has_allergy = _get_val(allergy_obj, "hasAllergy", False)
-        allergy_details = str(_get_val(allergy_obj, "details", "")).lower()
-        allergy_text = allergy_details if has_allergy else ""
-        
+        # DrugAllergyHistory exposes `allergies` / `currentMedications`; reading
+        # `hasAllergy` / `details` here always fell back to the defaults, which left
+        # allergy_text empty and made every allergy check below unreachable.
+        allergy_text = str(_get_val(allergy_obj, "allergies", "") or "").lower()
+
         # 1. Collect all extracted & amended medications
+        # (a) Medications the patient reported during the kiosk conversation.
+        for med in (_get_val(allergy_obj, "currentMedications", None) or []):
+            name = med if isinstance(med, str) else _get_val(med, "name", "")
+            if name:
+                extracted_drugs.append(str(name))
+
+        # (b) Medications extracted from uploaded prescriptions and reports.
         prior_docs = _get_val(session, "priorInvestigations") or []
         for doc in prior_docs:
             extracted = _get_val(doc, "extracted")
@@ -132,6 +140,14 @@ class DDIService:
                     name = med.get("name", "") if isinstance(med, dict) else getattr(med, "name", "")
                     if name:
                         extracted_drugs.append(name)
+
+        # The same drug often arrives from both sources; de-duplicate so it is not
+        # paired against itself in the interaction sweep below.
+        _seen: set = set()
+        extracted_drugs = [
+            d for d in extracted_drugs
+            if not (d.strip().lower() in _seen or _seen.add(d.strip().lower()))
+        ]
 
         # Check chief complaints and conversation turns for Ayurvedic / Homeopathic herbs mentioned
         conv_turns = _get_val(session, "conversationTurns") or []
@@ -156,8 +172,11 @@ class DDIService:
         allergy_warnings: List[str] = []
         contraindications: List[str] = []
 
-        # Check Allergy Warnings
-        if allergy_text and allergy_text != "no known drug allergies (nkda)":
+        # Check Allergy Warnings. Skip explicit denials in any of their phrasings;
+        # an unconfirmed status carries no drug name, so it matches no rule below.
+        _denied = ("nkda" in allergy_text or "no known drug allerg" in allergy_text
+                   or "no known allerg" in allergy_text)
+        if allergy_text and not _denied:
             for drug in extracted_drugs:
                 for rule in cls.KNOWN_DDI_RULES:
                     p1, p2 = rule["pair"]
