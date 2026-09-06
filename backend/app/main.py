@@ -1596,3 +1596,62 @@ async def websocket_staff_endpoint(websocket: WebSocket):
         staff_service.disconnect_websocket(websocket)
     except Exception:
         staff_service.disconnect_websocket(websocket)
+
+# --- SERVE THE BUILT FRONTEND (single-service deployment) ---
+# Frontend and backend ship as one service on one origin. The React client calls
+# a relative "/api", which works in development only because Vite proxies it --
+# deployed separately those calls would hit the static host and 404. Serving both
+# from here also removes CORS and keeps the websocket on the same origin.
+
+_FRONTEND_DIST = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "frontend", "dist"
+)
+
+# Client-side routes that must return index.html rather than 404. An explicit
+# list, not a catch-all: a catch-all route would answer every unmatched path,
+# turning genuine 404s into 200s and unknown API methods into 405s.
+_SPA_ROUTES = {"", "kiosk", "physician", "emergency", "staff"}
+
+if os.path.isdir(_FRONTEND_DIST):
+    from fastapi.staticfiles import StaticFiles
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    _assets = os.path.join(_FRONTEND_DIST, "assets")
+    if os.path.isdir(_assets):
+        app.mount("/assets", StaticFiles(directory=_assets), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    async def serve_index():
+        return FileResponse(os.path.join(_FRONTEND_DIST, "index.html"))
+
+    @app.exception_handler(StarletteHTTPException)
+    async def spa_fallback(request, exc):
+        """
+        Serves the app shell for client-side routes only. /api paths, unknown
+        top-level paths and traversal attempts keep their real status code.
+        """
+        path = request.url.path
+        if exc.status_code == 404 and not path.startswith("/api"):
+            first = path.strip("/").split("/")[0] if path.strip("/") else ""
+            if first in _SPA_ROUTES and ".." not in path:
+                index = os.path.join(_FRONTEND_DIST, "index.html")
+                if os.path.isfile(index):
+                    return FileResponse(index)
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    # Static files that live at the root of the build (favicon, icons, manifest).
+    @app.get("/{filename}", include_in_schema=False)
+    async def serve_root_file(filename: str):
+        candidate = os.path.normpath(os.path.join(_FRONTEND_DIST, filename))
+        if candidate.startswith(_FRONTEND_DIST) and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        raise HTTPException(status_code=404, detail="Not found")
+else:
+    @app.get("/", include_in_schema=False)
+    async def no_frontend_built():
+        return {
+            "service": "MediKiosk API",
+            "docs": "/docs",
+            "note": "Frontend not built. Run 'npm run build' in frontend/ to serve the UI here.",
+        }
