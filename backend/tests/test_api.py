@@ -71,6 +71,36 @@ def test_red_flag_detection():
     assert "Acute Coronary Syndrome" in rf2.reason
     assert "IMMEDIATE" in rf2.action
 
+
+@pytest.mark.parametrize("complaint", [
+    # What a translated voice transcript actually says. Every one of these is a
+    # textbook ACS presentation that previously scored routine, because the
+    # rules only recognised the charted phrase "chest pain radiating to".
+    "I am having a very sharp pain in my chest and the pain is going into my left arm",
+    "I have pain in my chest and it is shooting down my left arm",
+    "There is heaviness in my chest that travels to my jaw",
+    "Tightness in the chest, spreading into the neck",
+    "Chest discomfort moving into my left shoulder",
+])
+def test_spoken_phrasing_of_a_heart_attack_still_raises_the_red_flag(complaint):
+    flag = red_flag_detector.evaluate(complaint, [])
+    assert flag.triggered is True, f"missed ACS presentation: {complaint!r}"
+    assert flag.urgency == "emergency"
+    assert "Acute Coronary Syndrome" in flag.reason
+
+
+@pytest.mark.parametrize("complaint", [
+    # Widening the phrasing must not start flagging ordinary OPD attendances.
+    "Mild chest discomfort after spicy food, no radiation, no sweating",
+    "Left arm and shoulder soreness after lifting heavy boxes",
+    "Burning in the chest after meals, relieved by antacids, denies radiation",
+    "Sore throat and dry cough for three days",
+    "Knee pain going up to my thigh after a fall",
+])
+def test_widened_phrasing_does_not_flag_routine_complaints(complaint):
+    flag = red_flag_detector.evaluate(complaint, [])
+    assert flag.triggered is False, f"false positive on: {complaint!r}"
+
 def test_session_lifecycle_and_adaptive_questions():
     # 1. Start Session
     reg_payload = {
@@ -231,6 +261,97 @@ def test_empty_audio_is_rejected_without_calling_a_provider():
         files={"file": ("recording.webm", io.BytesIO(b""), "audio/webm")}
     )
     assert trans_resp.json()["source"] == "transcription_failed"
+
+
+def _transcribe(name="Voice Patient"):
+    s_id = client.post("/api/session/start",
+                       json={"fullName": name, "age": 44, "gender": "Female"}
+                       ).json()["sessionId"]
+    return client.post(
+        f"/api/session/{s_id}/audio-transcribe?languageHint=hi-IN",
+        files={"file": ("recording.wav", io.BytesIO(b"RIFF....WAVEfmt ...."), "audio/wav")}
+    ).json()
+
+
+def test_a_server_with_no_speech_provider_says_so_instead_of_blaming_the_patient(monkeypatch):
+    """
+    The deployed service was missing GROQ_API_KEY entirely, so every recording
+    failed. Telling the patient to speak more clearly cannot fix a key that was
+    never set, and hides the one thing an operator could act on.
+    """
+    from app.config import settings
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+
+    data = _transcribe("No Provider")
+    assert data["transcript"] == ""
+    assert data["source"] == "transcription_failed"
+    error = data["error"].lower()
+    assert "not available" in error or "no speech recognition" in error
+    assert "api_key" in error or "api key" in error
+    # Must not imply the patient did anything wrong.
+    assert "speak" not in error
+
+
+def test_a_provider_outage_is_reported_as_an_outage_not_as_unclear_speech(monkeypatch):
+    """
+    An exhausted quota and a mumbled sentence produced the same message, so a
+    patient whose hospital had run out of credit was asked, repeatedly, to
+    repeat themselves.
+    """
+    from app.config import settings
+    from app.services.audio_service import AudioService
+    monkeypatch.setattr(settings, "GROQ_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+
+    async def _out_of_quota(*args, **kwargs):
+        return "", "", 0.0, "the account is out of quota or rate limited"
+
+    monkeypatch.setattr(AudioService, "_groq_transcribe", classmethod(_out_of_quota))
+
+    data = _transcribe("Quota Exhausted")
+    assert data["transcript"] == ""
+    error = data["error"]
+    assert "unavailable" in error.lower()
+    assert "quota" in error.lower()          # the operator can act on this
+    assert "closer to the microphone" not in error
+
+
+def test_silence_asks_the_patient_to_repeat_rather_than_reporting_an_outage():
+    """The stubbed providers answer without failing, having heard nothing."""
+    data = _transcribe("Silent Recording")
+    assert data["transcript"] == ""
+    error = data["error"].lower()
+    assert "no words could be made out" in error
+    assert "unavailable" not in error
+
+
+@pytest.mark.asyncio
+@pytest.mark.live_llm      # exercises the real method, which returns before any
+                           # network call -- that early return is the assertion
+async def test_gemini_is_not_sent_audio_it_cannot_read():
+    """
+    Gemini accepts wav/mp3/ogg/flac/aac/aiff inline -- not the WebM every Chrome
+    recording arrives as. Forwarding it produced an HTTP 400 indistinguishable
+    from silence, so the kiosk looked like it simply ignored the patient.
+    """
+    from app.services.audio_service import AudioService
+
+    result, problem = await AudioService._gemini_transcribe(
+        b"\x1aE\xdf\xa3 webm bytes", "audio/webm", "hi-IN", None)
+    assert result is None
+    assert problem and "webm" in problem
+    # And the format the kiosk actually uploads is accepted.
+    assert AudioService.GEMINI_AUDIO_MIME.get("audio/wav") == "audio/wav"
+
+
+def test_http_failures_are_translated_into_something_an_operator_can_act_on():
+    from app.services.audio_service import AudioService
+
+    assert "key" in AudioService._describe_http(401, "Unauthorized")
+    assert "quota" in AudioService._describe_http(429, "You exceeded your current quota")
+    assert "restricted" in AudioService._describe_http(
+        400, '{"error":{"message":"Organization has been restricted."}}')
 
 
 def test_real_and_sample_document_ocr_and_correction():

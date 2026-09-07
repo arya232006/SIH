@@ -40,7 +40,7 @@ export const MedicationClarifier: React.FC<MedicationClarifierProps> = ({
  try {
  setIsLoading(true);
  const res = await fetch(
- `http://127.0.0.1:8000/api/session/${sessionId}/document/${documentId}/medications/clarify/plan?language=${currentLang}`,
+ `/api/session/${sessionId}/document/${documentId}/medications/clarify/plan?language=${currentLang}`,
  { method: 'POST' }
  );
  if (res.ok) {
@@ -132,7 +132,7 @@ export const MedicationClarifier: React.FC<MedicationClarifierProps> = ({
  try {
  setIsSubmitting(true);
  const res = await fetch(
- `http://127.0.0.1:8000/api/session/${sessionId}/document/${documentId}/medications/clarify/answer`,
+ `/api/session/${sessionId}/document/${documentId}/medications/clarify/answer`,
  {
  method: 'POST',
  headers: { 'Content-Type': 'application/json' },
@@ -170,7 +170,7 @@ export const MedicationClarifier: React.FC<MedicationClarifierProps> = ({
 
  const handleEscalateManual = async () => {
  try {
- await fetch(`http://127.0.0.1:8000/api/session/${sessionId}/document/${documentId}/medications/escalate`, {
+ await fetch(`/api/session/${sessionId}/document/${documentId}/medications/escalate`, {
  method: 'POST'
  });
  if (onStatusChange) {

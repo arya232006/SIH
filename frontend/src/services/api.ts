@@ -140,7 +140,17 @@ export class ApiService {
     accentHint?: string
   ): Promise<AudioTranscriptionResponse> {
     const formData = new FormData();
-    formData.append('file', audioBlob, 'voice_recording.webm');
+    // The filename extension and the blob's type must both match what is really
+    // inside it. Speech providers dispatch on each of them, and a WAV announced
+    // as .webm is rejected before a single word is read -- which is exactly how
+    // every recording from Safari used to fail.
+    const mime = (audioBlob.type || 'audio/wav').split(';')[0].trim();
+    const extension = ({
+      'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
+      'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'mp4',
+      'audio/mpeg': 'mp3', 'audio/aac': 'aac', 'audio/flac': 'flac',
+    } as Record<string, string>)[mime] || 'wav';
+    formData.append('file', audioBlob, `voice_recording.${extension}`);
     const query = new URLSearchParams({ languageHint });
     if (accentHint) query.append('accentHint', accentHint);
     

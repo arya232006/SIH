@@ -79,10 +79,12 @@ def no_live_llm(request, monkeypatch):
         return ({}, 0.0, "other", None, "local_ocr_fallback")
 
     async def _no_asr(*args, **kwargs):
-        return "", "", 0.0
+        # (text, detected_language, confidence, problem) -- no problem, just no
+        # speech, so the service reports "heard nothing" rather than an outage.
+        return "", "", 0.0, None
 
     async def _no_gemini_asr(*args, **kwargs):
-        return None
+        return None, None
 
     monkeypatch.setattr(LLMService, "_call_llm_provider", classmethod(_no_llm))
     monkeypatch.setattr(OCRService, "_extract_with_vision_llm", classmethod(_no_vision))

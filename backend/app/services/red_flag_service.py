@@ -17,12 +17,39 @@ class RedFlagDetector:
     ]
 
     # 1. Acute Coronary Syndrome (ACS) / True Cardiac Emergency
+    #
+    # These patterns have to match how a patient's words actually arrive, not
+    # only how a clinician would write them up. Speech from the kiosk reaches
+    # here as an English rendering of what was spoken, and "pain in my chest
+    # going into my left arm" -- a textbook presentation -- matched nothing,
+    # because the rules required the literal adjacent words "chest pain" and
+    # the single preposition "to". Specificity is preserved by the rule below
+    # still demanding radiation or diaphoresis alongside the pain.
     CARDIAC_CHEST_PAIN = re.compile(
-        r"(crushing\s*chest\s*pain|squeezing\s*chest|heavy\s*squeezing\s*pressure|severe\s*retrosternal\s*chest|elephant\s*sitting\s*on\s*chest|crushing\s*heavy\s*chest|seene\s*me\s*tez\s*dard|chaati\s*me\s*bhari\s*dard|acute\s*chest\s*pain|chest\s*pain\s*since|chest\s*pain|chaati\s*me\s*dard)",
+        r"(crushing\s*chest\s*pain|squeezing\s*chest|heavy\s*squeezing\s*pressure"
+        r"|severe\s*retrosternal\s*chest|elephant\s*sitting\s*on\s*chest"
+        r"|crushing\s*heavy\s*chest|acute\s*chest\s*pain|chest\s*pain\s*since|chest\s*pain"
+        # How it is spoken rather than charted.
+        r"|chest\s*(pain|discomfort|tightness|pressure|heaviness|burning)"
+        r"|(pain|discomfort|tightness|pressure|heaviness)\s*(in|on|over)\s*"
+        r"(my\s*|the\s*|his\s*|her\s*)?chest"
+        # Romanised Hindi/Bengali, for speech that is not translated at all.
+        r"|seene\s*me\s*tez\s*dard|chaati\s*me\s*bhari\s*dard|chaati\s*me\s*dard"
+        r"|seene\s*me\s*dard|buke\s*byatha)",
         re.IGNORECASE
     )
+    _RADIATION_TARGET = (r"(left\s*arm|left\s*shoulder|left\s*hand|jaw|neck|back)")
     CARDIAC_RADIATION_LEFT = re.compile(
-        r"(radiat\w*\s*(down|to|into)?\s*(my\s*)?(left\s*arm|left\s*shoulder|jaw|neck|back)|spread\w*\s*(down|to|into)?\s*(my\s*)?(left\s*arm|left\s*shoulder|jaw|neck|back)|going\s*to\s*(my\s*)?(left\s*arm|left\s*shoulder|jaw|neck|back)|pain\s*in\s*left\s*arm\s*and\s*(chest|shoulder)|baayein\s*haath\s*me\s*dard\s*jaa\s*raha|left\s*haath\s*me\s*dard\s*jaa\s*raha)",
+        # "Radiating"/"spreading" are directional on their own; vaguer verbs
+        # must carry an explicit preposition so that merely mentioning an arm
+        # does not read as radiation.
+        rf"((radiat\w*|spread\w*)\s*(down|to|into|towards|in\s*to)?\s*"
+        rf"(my\s*|the\s*)?{_RADIATION_TARGET}"
+        rf"|(go\w*|mov\w*|travel\w*|shoot\w*|run\w*|extend\w*)\s*(down\s*|up\s*)?"
+        rf"(to|into|towards|in\s*to|down)\s*(my\s*|the\s*)?{_RADIATION_TARGET}"
+        rf"|pain\s*in\s*(my\s*)?left\s*arm\s*and\s*(chest|shoulder)"
+        rf"|baayein\s*haath\s*me\s*dard\s*jaa\s*raha"
+        rf"|left\s*haath\s*me\s*dard\s*jaa\s*raha)",
         re.IGNORECASE
     )
     CARDIAC_DIAPHORESIS_DYSPNEA = re.compile(
