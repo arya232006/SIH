@@ -255,6 +255,24 @@ def test_a_red_flag_pages_a_doctor_without_anyone_pressing_a_button():
         assert any(i["record"]["sessionId"] == sid for i in inbox)
 
 
+def test_the_response_window_is_long_enough_for_a_person_to_answer():
+    """
+    The window is how long a doctor has to answer a page, not how long a machine
+    has to reply. At 30 seconds an offer could expire before it was ever seen --
+    the portal polls, so part of the window is gone before the card renders, and
+    the doctor still has to read the case and decide.
+    """
+    assert DispatchService.URGENT_RESPONSE_SECONDS >= 90
+    assert DispatchService.STANDARD_RESPONSE_SECONDS >= DispatchService.URGENT_RESPONSE_SECONDS
+
+    # And the whole ladder still has to fit inside the clinical deadline with
+    # room to spare, otherwise a generous window just breaches the target.
+    stemi = DispatchService.protocol_for(STEMI)
+    worst_case_minutes = (DispatchService.URGENT_RESPONSE_SECONDS * 3) / 60
+    assert worst_case_minutes < stemi["deadlineMinutes"] * 0.25, (
+        "three unanswered offers would eat a quarter of the door-to-balloon target")
+
+
 def test_a_still_raised_red_flag_does_not_restart_the_ladder():
     """
     The flag is re-evaluated on every subsequent answer and stays raised. Acting
@@ -275,6 +293,98 @@ def test_a_still_raised_red_flag_does_not_restart_the_ladder():
     assert record is not None
     offers = [h for h in record.history if h.status != "pending"]
     assert len(offers) == 0, "the ladder restarted while an offer was outstanding"
+
+
+def _accepted_case_then_doctor_leaves():
+    """Dispatches a seeded emergency, has the paged doctor accept, then go off duty."""
+    DispatchService.reset()
+    sid = _emergency_session_id()
+    rec = client.post(f"/api/dispatch/session/{sid}/dispatch",
+                      headers=doctor_auth()).json()
+    paged = rec["currentOffer"]["doctorId"]
+    owner = doctor_auth(*DOCTOR_LOGINS[paged])
+    client.post(f"/api/dispatch/session/{sid}/accept", headers=owner)
+    client.post("/api/doctor/duty", json={"dutyState": "off_duty", "note": ""},
+                headers=owner)
+    return sid, paged
+
+
+def test_a_patient_whose_doctor_left_is_visible_to_someone_still_on_duty():
+    """
+    The handover event fired and the bed was flagged, but no screen read either,
+    so a patient sat in a resuscitation bay owned by a doctor who had gone home
+    and nobody was told. It has to reach a person to be worth raising.
+    """
+    sid, gone = _accepted_case_then_doctor_leaves()
+
+    record = DispatchService.record_for(sid)
+    assert record.handoverRequired is True
+    assert record.handoverFromDoctorId == gone
+
+    # Somebody else on shift sees it, labelled as a handover rather than an offer.
+    others = [d for d in DOCTOR_LOGINS if d != gone]
+    seen_by = []
+    for doctor_id in others:
+        inbox = client.get("/api/doctor/inbox",
+                           headers=doctor_auth(*DOCTOR_LOGINS[doctor_id])).json()
+        for item in inbox:
+            if item["record"]["sessionId"] == sid and item["kind"] == "handover":
+                seen_by.append(doctor_id)
+                assert "holdsPrivilege" in item
+                assert item["patient"]["patientName"]
+    assert seen_by, "nobody on duty was told the patient had lost their doctor"
+
+    # And the doctor who walked out is not asked to take their own patient back.
+    gone_inbox = client.get("/api/doctor/inbox",
+                            headers=doctor_auth(*DOCTOR_LOGINS[gone])).json()
+    assert not any(i["record"]["sessionId"] == sid for i in gone_inbox)
+
+
+def test_taking_over_transfers_ownership_and_clears_the_bed_flag():
+    sid, gone = _accepted_case_then_doctor_leaves()
+
+    from app.services.bed_service import bed_service
+    allocation = bed_service.allocations.get(sid)
+    if allocation and allocation.status == "assigned":
+        assert allocation.handoverRequired is True
+
+    taker = next(d for d in DOCTOR_LOGINS if d != gone)
+    res = client.post(f"/api/dispatch/session/{sid}/take-over",
+                      headers=doctor_auth(*DOCTOR_LOGINS[taker]))
+    assert res.status_code == 200
+    record = res.json()
+    assert record["acceptedByDoctorId"] == taker
+    assert record["handoverRequired"] is False
+    assert record["status"] == "accepted"
+
+    # Bed management learns by subscribing, exactly as it did on the way in.
+    if allocation and allocation.status == "assigned":
+        assert allocation.handoverRequired is False
+
+    # It leaves everyone's inbox once somebody owns it again.
+    for doctor_id in DOCTOR_LOGINS:
+        inbox = client.get("/api/doctor/inbox",
+                           headers=doctor_auth(*DOCTOR_LOGINS[doctor_id])).json()
+        assert not any(i["record"]["sessionId"] == sid and i["kind"] == "handover"
+                       for i in inbox)
+
+
+def test_a_handover_cannot_be_claimed_twice_or_when_none_is_pending():
+    sid, gone = _accepted_case_then_doctor_leaves()
+    taker = next(d for d in DOCTOR_LOGINS if d != gone)
+    assert client.post(f"/api/dispatch/session/{sid}/take-over",
+                       headers=doctor_auth(*DOCTOR_LOGINS[taker])).status_code == 200
+
+    second = next(d for d in DOCTOR_LOGINS if d not in (gone, taker))
+    res = client.post(f"/api/dispatch/session/{sid}/take-over",
+                      headers=doctor_auth(*DOCTOR_LOGINS[second]))
+    assert res.status_code == 409
+    assert "not awaiting a handover" in res.json()["detail"].lower()
+
+
+def test_take_over_requires_authentication():
+    sid, _ = _accepted_case_then_doctor_leaves()
+    assert client.post(f"/api/dispatch/session/{sid}/take-over").status_code == 401
 
 
 @pytest.mark.real_clock

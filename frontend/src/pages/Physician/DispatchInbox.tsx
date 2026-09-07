@@ -1,23 +1,27 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Siren, Clock, CheckCircle2, XCircle, Loader2, AlertTriangle, ArrowRight
+  Siren, Clock, CheckCircle2, XCircle, Loader2, AlertTriangle, ArrowRight,
+  UserMinus, ShieldAlert
 } from 'lucide-react';
 import { DispatchInboxItem } from '../../types';
 import { ApiService } from '../../services/api';
 
 /**
- * Emergency cases paged to the signed-in doctor, with the two decisions that
- * matter: take it, or hand it back.
+ * Cases needing a decision from the signed-in doctor. Two kinds, and the
+ * difference between them is the whole point.
  *
- * The dispatcher assigns automatically, but nothing is owned until the paged
- * doctor accepts. Declining is not a failure path -- it is the mechanism that
- * makes automatic assignment safe, because the roster does not know a doctor is
+ * An OFFER is a new emergency being paged out. Nothing is owned until the paged
+ * doctor accepts, and declining is not a failure path -- it is what makes
+ * automatic assignment safe, because the roster does not know a doctor is
  * scrubbed in or already resuscitating someone. The reason is kept, since it is
  * ground truth the roster lacks.
  *
- * The backend has had accept and decline endpoints since dispatch was built;
- * until now nothing in the portal called them, so an offered case could only be
- * accepted by letting it time out and roll to somebody else.
+ * A HANDOVER is a patient already under treatment whose doctor went off duty.
+ * It cannot be declined, because declining would leave nobody responsible for
+ * someone who is already in a bed. It can only be claimed, and it is shown to
+ * every doctor on shift rather than only the credentialled ones: an unowned
+ * patient with nobody watching is the worse failure. The card says plainly
+ * whether this doctor holds the privilege, so custody is taken with eyes open.
  */
 
 const DECLINE_REASONS = [
@@ -75,7 +79,10 @@ export const DispatchInbox: React.FC<{ onChanged?: () => void }> = ({ onChanged 
 
   useEffect(() => {
     load();
-    const poll = setInterval(load, 10000);
+    // Fast enough that a paged case appears while there is still time to act on
+    // it. Polling every ten seconds against a response window measured in tens
+    // of seconds spent a large part of that window showing nothing.
+    const poll = setInterval(load, 4000);
     const clock = setInterval(() => setNowMs(Date.now()), 1000);
     return () => { clearInterval(poll); clearInterval(clock); };
   }, [load]);
@@ -99,8 +106,13 @@ export const DispatchInbox: React.FC<{ onChanged?: () => void }> = ({ onChanged 
 
   if (!items.length && !error && !outcome) return null;
 
+  // A live emergency outranks an unowned one for the colour of the whole strip.
+  const hasOffer = items.some((i) => i.kind === 'offer');
+
   return (
-    <div className="bg-rose-50 border-b-2 border-rose-300">
+    <div className={hasOffer
+      ? 'bg-rose-50 border-b-2 border-rose-300'
+      : 'bg-amber-50 border-b-2 border-amber-300'}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 space-y-3">
 
         {outcome && (
@@ -122,35 +134,49 @@ export const DispatchInbox: React.FC<{ onChanged?: () => void }> = ({ onChanged 
           </div>
         )}
 
-        {items.map(({ record, patient }) => {
+        {items.map(({ kind, record, patient, holdsPrivilege }) => {
           const offer = record.currentOffer;
-          if (!offer) return null;
+          const isHandover = kind === 'handover';
+          if (!offer && !isHandover) return null;
 
           const seenAt = firstSeen.current.get(record.sessionId)?.at ?? nowMs;
           const elapsed = Math.floor((nowMs - seenAt) / 1000);
-          const secondsLeft = Math.max(0, offer.respondBySeconds - elapsed);
+          const secondsLeft = offer ? Math.max(0, offer.respondBySeconds - elapsed) : 0;
           const urgent = secondsLeft <= 30;
           const isBusy = busy === record.sessionId;
 
           return (
-            <div key={record.sessionId}
-                 className="bg-white rounded-2xl border-2 border-rose-400 shadow-md overflow-hidden">
+            <div key={`${kind}-${record.sessionId}`}
+                 className={`bg-white rounded-2xl border-2 shadow-md overflow-hidden ${
+                   isHandover ? 'border-amber-400' : 'border-rose-400'}`}>
 
-              <div className="px-4 py-2.5 bg-rose-600 text-white flex flex-wrap items-center justify-between gap-2">
+              <div className={`px-4 py-2.5 text-white flex flex-wrap items-center justify-between gap-2 ${
+                isHandover ? 'bg-amber-600' : 'bg-rose-600'}`}>
                 <div className="flex items-center gap-2 min-w-0">
-                  <Siren className="w-4 h-4 shrink-0" />
+                  {isHandover ? <UserMinus className="w-4 h-4 shrink-0" />
+                              : <Siren className="w-4 h-4 shrink-0" />}
                   <span className="text-xs font-black uppercase tracking-wider shrink-0">
-                    Emergency assigned to you
+                    {isHandover ? 'Patient left without a doctor'
+                                : 'Emergency assigned to you'}
                   </span>
                   <span className="text-xs font-mono bg-white/20 px-1.5 py-0.5 rounded shrink-0">
                     {patient.tokenNumber}
                   </span>
                 </div>
-                <div className={`flex items-center gap-1.5 text-xs font-mono font-bold px-2 py-0.5 rounded ${
-                  urgent ? 'bg-white text-rose-700 animate-pulse' : 'bg-white/20 text-white'}`}>
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>{secondsLeft}s to respond</span>
-                </div>
+                {isHandover ? (
+                  // No countdown: nothing rolls onward from here. The patient
+                  // stays unowned until a person claims them, which is the
+                  // reason this is visible at all.
+                  <span className="text-xs font-bold bg-white/20 px-2 py-0.5 rounded">
+                    Awaiting a clinician
+                  </span>
+                ) : (
+                  <div className={`flex items-center gap-1.5 text-xs font-mono font-bold px-2 py-0.5 rounded ${
+                    urgent ? 'bg-white text-rose-700 animate-pulse' : 'bg-white/20 text-white'}`}>
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>{secondsLeft}s to respond</span>
+                  </div>
+                )}
               </div>
 
               <div className="p-4 space-y-3">
@@ -164,7 +190,10 @@ export const DispatchInbox: React.FC<{ onChanged?: () => void }> = ({ onChanged 
                         </span>
                       )}
                     </div>
-                    <div className="text-xs font-bold text-rose-800 mt-0.5">{record.condition}</div>
+                    <div className={`text-xs font-bold mt-0.5 ${
+                      isHandover ? 'text-amber-800' : 'text-rose-800'}`}>
+                      {record.condition}
+                    </div>
                     {patient.chiefComplaint && (
                       <p className="text-xs text-slate-600 mt-1 max-w-2xl">{patient.chiefComplaint}</p>
                     )}
@@ -192,7 +221,7 @@ export const DispatchInbox: React.FC<{ onChanged?: () => void }> = ({ onChanged 
                 </div>
 
                 {/* Why this landed on your screen and not someone else's. */}
-                {offer.reasoning.length > 0 && (
+                {offer && offer.reasoning.length > 0 && (
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
                       Why you were paged
@@ -207,7 +236,31 @@ export const DispatchInbox: React.FC<{ onChanged?: () => void }> = ({ onChanged 
                   </div>
                 )}
 
-                {record.declinedDoctorIds.length > 0 && (
+                {isHandover && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 space-y-1.5">
+                    <p className="text-[11px] text-amber-900 font-medium">
+                      {record.handoverReason ||
+                        'The doctor treating this patient has gone off duty.'}
+                    </p>
+                    <p className="text-[11px] text-amber-800">
+                      They are still in their bed and still being treated. This case
+                      is not re-assigned automatically &mdash; someone has to knowingly
+                      pick them up.
+                    </p>
+                    {!holdsPrivilege && (
+                      <p className="flex items-start gap-1.5 text-[11px] font-bold text-rose-800 pt-0.5">
+                        <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-px" />
+                        <span>
+                          You do not hold &lsquo;{record.requiredPrivilege}&rsquo;. Taking
+                          this patient means custodial responsibility until someone
+                          credentialled is free.
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {!isHandover && record.declinedDoctorIds.length > 0 && (
                   <p className="text-[11px] text-slate-500">
                     Previously offered to {record.declinedDoctorIds.length} other doctor(s).
                   </p>
@@ -259,6 +312,25 @@ export const DispatchInbox: React.FC<{ onChanged?: () => void }> = ({ onChanged 
                         Back
                       </button>
                     </div>
+                  </div>
+                ) : isHandover ? (
+                  <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+                    <button
+                      type="button" disabled={isBusy}
+                      onClick={() => act(record.sessionId,
+                        () => ApiService.takeOverDispatch(record.sessionId),
+                        `${patient.patientName} is now under your care.`)}
+                      className="px-5 py-2.5 bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white text-xs font-black rounded-xl flex items-center gap-1.5 min-h-[44px] cursor-pointer"
+                    >
+                      {isBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              : <CheckCircle2 className="w-4 h-4" />}
+                      <span>Take over this patient</span>
+                    </button>
+                    {/* Deliberately no decline. Refusing a patient who is already
+                        in a bed would leave nobody responsible for them. */}
+                    <span className="text-[11px] text-slate-500">
+                      This stays on every on-duty doctor&rsquo;s screen until somebody takes it.
+                    </span>
                   </div>
                 ) : (
                   <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">

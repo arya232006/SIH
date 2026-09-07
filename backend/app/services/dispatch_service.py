@@ -488,8 +488,20 @@ class DispatchService:
     # owns the case, which is how clinical responsibility already works.
 
     # Response window before the offer falls through to the next candidate.
-    URGENT_RESPONSE_SECONDS = 30       # acuity >= 4.5
-    STANDARD_RESPONSE_SECONDS = 60
+    #
+    # These are how long a *person* has to answer a page, so they have to be
+    # measured against how people work rather than how fast a machine can reply.
+    # At the original 30 seconds an offer could expire before it was ever seen:
+    # the portal polls for new cases, so several seconds are gone before the card
+    # renders, and the doctor still has to read the case and decide. Cases were
+    # observed rolling on to escalation with nobody having had a real chance.
+    #
+    # The cost is bounded by the clinical deadline, not by these numbers. A STEMI
+    # has ninety minutes door-to-balloon; three candidates at two minutes each is
+    # six minutes of ladder, under 7% of the budget, and only in the worst case
+    # where nobody answers at all. A decline is instant and does not wait.
+    URGENT_RESPONSE_SECONDS = 120      # acuity >= 4.5
+    STANDARD_RESPONSE_SECONDS = 180
 
     _records: Dict[str, DispatchRecord] = {}
 
@@ -802,14 +814,57 @@ class DispatchService:
         # 2. Cases they had accepted -- these need a person, not a reassignment.
         for record in cls._records.values():
             if record.status == "accepted" and record.acceptedByDoctorId == doctor_id:
+                who = payload.get("fullName", doctor_id)
+                record.handoverRequired = True
+                record.handoverFromDoctorId = doctor_id
+                record.handoverFromName = who
+                record.handoverReason = (
+                    f"{who} went off duty while this patient was under their care.")
                 await event_log.emit(
                     "dispatch.handover_required",
                     {"sessionId": record.sessionId, "condition": record.condition,
                      "doctorId": doctor_id,
-                     "doctorName": payload.get("fullName", doctor_id),
+                     "doctorName": who,
+                     "requiredPrivilege": record.requiredPrivilege,
                      "acuityWeight": record.acuityWeight},
                     actor="policy:dispatch", sessionId=record.sessionId,
                     causedBy=event.eventId)
+
+    # --- Handover ------------------------------------------------------------
+
+    @classmethod
+    def handovers_pending(cls) -> List[DispatchRecord]:
+        """Accepted cases whose owning doctor has gone, still waiting for one."""
+        return [r for r in cls._records.values() if r.handoverRequired]
+
+    @classmethod
+    def take_over(cls, session, doctor, now: Optional[datetime] = None) -> DispatchRecord:
+        """
+        A doctor claims custody of a patient whose clinician went off duty.
+
+        Deliberately a claim rather than an assignment. The dispatcher will
+        happily re-offer a case nobody has touched, but this patient is already
+        being treated, and the person who picks them up has to know they have.
+        """
+        now = now or clock.now()
+        record = cls._records.get(getattr(session, "sessionId", ""))
+        if record is None:
+            raise ValueError("No dispatch record for this session")
+        if not record.handoverRequired:
+            raise PermissionError("This case is not awaiting a handover")
+
+        previous = record.handoverFromDoctorId
+        if previous:
+            doctor_service.release_assignment(previous)
+
+        record.acceptedByDoctorId = doctor.doctorId
+        record.acceptedByName = doctor.fullName
+        record.acceptedAt = now.strftime("%H:%M:%S")
+        record.status = "accepted"
+        record.handoverRequired = False
+        record.handoverReason = None
+        doctor_service.record_assignment(doctor.doctorId, record.acuityWeight)
+        return record
 
     @classmethod
     def record_for(cls, session_id: str) -> Optional[DispatchRecord]:

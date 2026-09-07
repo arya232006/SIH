@@ -569,6 +569,14 @@ class DispatchRecord(BaseModel):
     acceptedAt: Optional[str] = None
     escalation: List[str] = Field(default_factory=list)
     rationale: str = ""
+    # Set when the doctor who accepted this case went off duty. The case is not
+    # re-offered automatically -- a patient already under treatment cannot be
+    # silently handed to someone who has never seen them -- so it needs a named
+    # clinician to claim it instead.
+    handoverRequired: bool = False
+    handoverReason: Optional[str] = None
+    handoverFromDoctorId: Optional[str] = None
+    handoverFromName: Optional[str] = None
 
 class DispatchDeclineRequest(BaseModel):
     reason: str

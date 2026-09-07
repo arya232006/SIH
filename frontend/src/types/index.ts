@@ -469,9 +469,22 @@ export interface DispatchRecord {
   acceptedAt?: string | null;
   escalation: string[];
   rationale: string;
+  /** Set when the doctor who accepted this case went off duty mid-treatment. */
+  handoverRequired?: boolean;
+  handoverReason?: string | null;
+  handoverFromDoctorId?: string | null;
+  handoverFromName?: string | null;
 }
 
 export interface DispatchInboxItem {
+  /**
+   * 'offer' is a new case being paged out and can be declined.
+   * 'handover' is a patient already under treatment whose doctor left; it can
+   * only be claimed, because declining would leave nobody responsible.
+   */
+  kind: 'offer' | 'handover';
+  /** Whether this doctor holds the privilege the case requires. */
+  holdsPrivilege: boolean;
   record: DispatchRecord;
   patient: {
     sessionId: string;

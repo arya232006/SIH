@@ -421,6 +421,15 @@ export class ApiService {
     return this.handleResponse<DispatchRecord>(res);
   }
 
+  /** Claim a patient whose treating doctor went off duty. */
+  static async takeOverDispatch(sessionId: string): Promise<DispatchRecord> {
+    const res = await fetch(`${API_BASE}/dispatch/session/${sessionId}/take-over`, {
+      method: 'POST',
+      headers: this.doctorHeaders()
+    });
+    return this.handleResponse<DispatchRecord>(res);
+  }
+
   static async getAvailableDoctors(params: {
     department?: string; privilege?: string; includeInterrupted?: boolean;
   } = {}): Promise<DoctorAccount[]> {
