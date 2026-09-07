@@ -30,7 +30,8 @@ interface StepConverseProps {
  mode: 'voice' | 'tap',
  ayushMode: boolean,
  field?: string,
- questionText?: string
+ questionText?: string,
+ clinicalText?: string
  ) => Promise<void>;
  onUndoAnswer: () => Promise<void>;
  onProceedToScan: () => void;
@@ -61,6 +62,9 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  const [isSpeakingPrompt, setIsSpeakingPrompt] = useState<boolean>(false);
  const [interimTranscript, setInterimTranscript] = useState<string>('');
  const [pendingVoiceAnswer, setPendingVoiceAnswer] = useState<string | null>(null);
+ // English rendering of the pending answer. The clinical rules match English
+ // keywords, so speech in another language needs this to raise a red flag.
+ const [pendingVoiceClinical, setPendingVoiceClinical] = useState<string | undefined>(undefined);
  const [detectedAccent, setDetectedAccent] = useState<string>('Indian English / Multilingual');
  const [normalizedTerms, setNormalizedTerms] = useState<string[]>([]);
  const [isCallingStaff, setIsCallingStaff] = useState<boolean>(false);
@@ -254,6 +258,7 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  // In Guided/Assisted Mode: show verification preview box so user can confirm or retry
  if (accessibilitySettings?.guidedMode || accessibilitySettings?.assistedMode) {
  setPendingVoiceAnswer(res.transcript);
+ setPendingVoiceClinical(res.clinicalText);
  setInterimTranscript(res.transcript);
  
  // Audio confirmation
@@ -267,7 +272,8 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  'voice',
  session.ayushMode,
  currentQuestion.field,
- currentQuestion.question
+ currentQuestion.question,
+ res.clinicalText
  );
  }
  }
@@ -305,13 +311,16 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  const handleConfirmPendingVoiceAnswer = () => {
  if (!pendingVoiceAnswer) return;
  const answer = pendingVoiceAnswer;
+ const clinical = pendingVoiceClinical;
  setPendingVoiceAnswer(null);
+ setPendingVoiceClinical(undefined);
  onAnswerSubmit(
  answer,
  'voice',
  session.ayushMode,
  currentQuestion.field,
- currentQuestion.question
+ currentQuestion.question,
+ clinical
  );
  };
 

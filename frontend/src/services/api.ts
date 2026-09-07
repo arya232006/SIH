@@ -112,12 +112,16 @@ export class ApiService {
     mode: 'voice' | 'tap' | 'staff-manual' = 'tap',
     ayushMode: boolean = false,
     field?: string,
-    questionText?: string
+    questionText?: string,
+    // English rendering when the answer was spoken in another language. The
+    // clinical rules match English keywords, so without this a complaint given
+    // in Hindi matches nothing and raises no red flag.
+    clinicalText?: string
   ): Promise<{ adaptive: AdaptiveQuestion; redFlag: RedFlag; session: PatientSession }> {
     const res = await fetch(`${API_BASE}/session/${sessionId}/answer`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answer, mode, ayushMode, field, questionText })
+      body: JSON.stringify({ answer, mode, ayushMode, field, questionText, clinicalText })
     });
     return this.handleResponse(res);
   }

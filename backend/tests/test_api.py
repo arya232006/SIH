@@ -197,22 +197,41 @@ def test_symptom_specific_questioning_specialties_sequential_progression():
     assert data_msk["adaptive"]["symptomCategory"] == "Musculoskeletal"
     assert data_msk["adaptive"]["field"] == "vitals_baseline_common"
 
-def test_multilingual_audio_transcription_and_colloquialisms():
-    resp = client.post("/api/session/start", json={"fullName": "Rajesh Kumar", "age": 50, "gender": "Male"})
+def test_transcription_failure_is_reported_not_invented():
+    """
+    With no speech provider available the endpoint must say so. It used to
+    return a canned sentence -- "mild stomach discomfort and acid reflux" -- at
+    0.91 confidence, which then became the chief complaint driving red-flag
+    detection and routing. A patient describing chest pain could be recorded as
+    having reflux.
+    """
+    resp = client.post("/api/session/start",
+                       json={"fullName": "Rajesh Kumar", "age": 50, "gender": "Male"})
     s_id = resp.json()["sessionId"]
 
-    # Submit simulated audio file
-    fake_audio_bytes = b"RIFF....WAVEfmt ...."
     trans_resp = client.post(
-        f"/api/session/{s_id}/audio-transcribe?languageHint=hi-IN&accentHint=Hindi%20/%20Hinglish",
-        files={"file": ("recording.webm", io.BytesIO(fake_audio_bytes), "audio/webm")}
+        f"/api/session/{s_id}/audio-transcribe?languageHint=hi-IN",
+        files={"file": ("recording.webm", io.BytesIO(b"RIFF....WAVEfmt ...."), "audio/webm")}
     )
     assert trans_resp.status_code == 200
     data = trans_resp.json()
-    assert "transcript" in data
-    assert data["detectedLanguage"] == "hi-IN"
-    assert "accent" in data
-    assert len(data["normalizedMedicalTerms"]) > 0
+    assert data["source"] == "transcription_failed"
+    assert data["transcript"] == ""
+    assert data["confidence"] == 0.0
+    assert data["error"]
+    assert data["normalizedMedicalTerms"] == []
+
+
+def test_empty_audio_is_rejected_without_calling_a_provider():
+    resp = client.post("/api/session/start",
+                       json={"fullName": "Empty Audio", "age": 40, "gender": "Male"})
+    s_id = resp.json()["sessionId"]
+    trans_resp = client.post(
+        f"/api/session/{s_id}/audio-transcribe?languageHint=en-IN",
+        files={"file": ("recording.webm", io.BytesIO(b""), "audio/webm")}
+    )
+    assert trans_resp.json()["source"] == "transcription_failed"
+
 
 def test_real_and_sample_document_ocr_and_correction():
     # Create test session
@@ -952,3 +971,47 @@ def test_multi_document_attachment_and_dual_pass_crosscheck():
 
 
 
+
+
+def test_non_english_complaint_still_raises_a_red_flag():
+    """
+    The clinical engines match romanised/English keywords, so a correct Hindi
+    transcript in Devanagari matches nothing -- a patient describing crushing
+    chest pain in Hindi would raise no red flag at all. The English rendering
+    produced at transcription is what the rules read; the verbatim words stay
+    on the record.
+    """
+    resp = client.post("/api/session/start",
+                       json={"fullName": "Ramesh Verma", "age": 58,
+                             "gender": "Male", "language": "hi"})
+    s_id = resp.json()["sessionId"]
+
+    hindi = "सीने में बहुत तेज़ दर्द हो रहा है और बाएं हाथ तक जा रहा है, ठंडा पसीना आ रहा है"
+    res = client.post(f"/api/session/{s_id}/answer", json={
+        "answer": hindi,
+        "clinicalText": "Severe crushing chest pain radiating to the left arm with cold sweating",
+        "mode": "voice",
+        "field": "chief_complaint",
+    })
+    assert res.status_code == 200
+    body = res.json()
+
+    # The patient's own words are what got recorded.
+    assert body["session"]["chiefComplaint"] == hindi
+    # ...and the rules still saw the emergency.
+    assert body["redFlag"]["triggered"] is True
+    assert "Acute Coronary Syndrome" in body["redFlag"]["reason"]
+
+
+def test_the_same_complaint_without_translation_is_missed():
+    """Demonstrates the bug the clinicalText field exists to fix."""
+    resp = client.post("/api/session/start",
+                       json={"fullName": "Control Case", "age": 58, "gender": "Male"})
+    s_id = resp.json()["sessionId"]
+    res = client.post(f"/api/session/{s_id}/answer", json={
+        "answer": "सीने में बहुत तेज़ दर्द हो रहा है और बाएं हाथ तक जा रहा है",
+        "mode": "voice",
+        "field": "chief_complaint",
+    })
+    # No English rendering supplied, so the keyword rules match nothing.
+    assert res.json()["redFlag"]["triggered"] is False

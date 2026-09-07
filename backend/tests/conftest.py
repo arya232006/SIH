@@ -17,6 +17,7 @@ import pytest
 
 from app.services import clock
 from app.services.llm_service import LLMService
+from app.services.audio_service import AudioService
 from app.services.ocr_service import OCRService
 
 # Wednesday 15:00. Chosen so the seeded roster has several doctors on shift with
@@ -77,6 +78,14 @@ def no_live_llm(request, monkeypatch):
         # Same shape _extract_with_vision_llm returns when it cannot answer.
         return ({}, 0.0, "other", None, "local_ocr_fallback")
 
+    async def _no_asr(*args, **kwargs):
+        return "", "", 0.0
+
+    async def _no_gemini_asr(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(LLMService, "_call_llm_provider", classmethod(_no_llm))
     monkeypatch.setattr(OCRService, "_extract_with_vision_llm", classmethod(_no_vision))
+    monkeypatch.setattr(AudioService, "_groq_transcribe", classmethod(_no_asr))
+    monkeypatch.setattr(AudioService, "_gemini_transcribe", classmethod(_no_gemini_asr))
     yield

@@ -121,7 +121,8 @@ export const KioskContainer: React.FC<KioskContainerProps> = ({
  mode: 'voice' | 'tap',
  ayushMode: boolean,
  field?: string,
- questionText?: string
+ questionText?: string,
+ clinicalText?: string
  ) => {
  if (!session) return;
  const activeId = session.sessionId || session.patientId;
@@ -137,7 +138,8 @@ export const KioskContainer: React.FC<KioskContainerProps> = ({
  mode,
  ayushMode,
  activeField,
- activeQuestionText
+ activeQuestionText,
+ clinicalText
  );
  setSession(res.session);
  setRedFlag(res.redFlag);
