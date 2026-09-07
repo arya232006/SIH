@@ -488,8 +488,20 @@ class DispatchService:
     # owns the case, which is how clinical responsibility already works.
 
     # Response window before the offer falls through to the next candidate.
-    URGENT_RESPONSE_SECONDS = 30       # acuity >= 4.5
-    STANDARD_RESPONSE_SECONDS = 60
+    #
+    # These are how long a *person* has to answer a page, so they have to be
+    # measured against how people work rather than how fast a machine can reply.
+    # At the original 30 seconds an offer could expire before it was ever seen:
+    # the portal polls for new cases, so several seconds are gone before the card
+    # renders, and the doctor still has to read the case and decide. Cases were
+    # observed rolling on to escalation with nobody having had a real chance.
+    #
+    # The cost is bounded by the clinical deadline, not by these numbers. A STEMI
+    # has ninety minutes door-to-balloon; three candidates at two minutes each is
+    # six minutes of ladder, under 7% of the budget, and only in the worst case
+    # where nobody answers at all. A decline is instant and does not wait.
+    URGENT_RESPONSE_SECONDS = 120      # acuity >= 4.5
+    STANDARD_RESPONSE_SECONDS = 180
 
     _records: Dict[str, DispatchRecord] = {}
 

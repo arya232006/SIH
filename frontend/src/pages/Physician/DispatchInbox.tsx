@@ -75,7 +75,10 @@ export const DispatchInbox: React.FC<{ onChanged?: () => void }> = ({ onChanged 
 
   useEffect(() => {
     load();
-    const poll = setInterval(load, 10000);
+    // Fast enough that a paged case appears while there is still time to act on
+    // it. Polling every ten seconds against a response window measured in tens
+    // of seconds spent a large part of that window showing nothing.
+    const poll = setInterval(load, 4000);
     const clock = setInterval(() => setNowMs(Date.now()), 1000);
     return () => { clearInterval(poll); clearInterval(clock); };
   }, [load]);

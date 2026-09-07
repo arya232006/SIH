@@ -472,14 +472,21 @@ SAFETY RULES:
                     "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
                     "response_format": {"type": "json_object"}
                 }
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                # Measured, not guessed: a real intake prompt takes 14s on
+                # gpt-5-mini and 22s on gpt-5-nano, because these models reason
+                # before answering. At the old 10s every single call timed out
+                # and fell back to the rule engine, so the model was configured,
+                # billed for nothing, and never actually used.
+                async with httpx.AsyncClient(timeout=60.0) as client:
                     resp = await client.post(url, headers=headers, json=payload)
                     if resp.status_code == 200:
                         return resp.json()["choices"][0]["message"]["content"]
                     else:
                         print(f"[OpenAI Call Failed] HTTP {resp.status_code}: {resp.text[:200]}")
             except Exception as e:
-                print(f"[OpenAI Call Failed]: {e}")
+                # httpx timeouts stringify to '', so the type has to be named or
+                # the log line reads "[OpenAI Call Failed]: " and says nothing.
+                print(f"[OpenAI Call Failed] {type(e).__name__}: {e or 'no detail'}")
         
         if provider == "gemini" and settings.GEMINI_API_KEY:
             try:

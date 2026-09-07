@@ -255,6 +255,24 @@ def test_a_red_flag_pages_a_doctor_without_anyone_pressing_a_button():
         assert any(i["record"]["sessionId"] == sid for i in inbox)
 
 
+def test_the_response_window_is_long_enough_for_a_person_to_answer():
+    """
+    The window is how long a doctor has to answer a page, not how long a machine
+    has to reply. At 30 seconds an offer could expire before it was ever seen --
+    the portal polls, so part of the window is gone before the card renders, and
+    the doctor still has to read the case and decide.
+    """
+    assert DispatchService.URGENT_RESPONSE_SECONDS >= 90
+    assert DispatchService.STANDARD_RESPONSE_SECONDS >= DispatchService.URGENT_RESPONSE_SECONDS
+
+    # And the whole ladder still has to fit inside the clinical deadline with
+    # room to spare, otherwise a generous window just breaches the target.
+    stemi = DispatchService.protocol_for(STEMI)
+    worst_case_minutes = (DispatchService.URGENT_RESPONSE_SECONDS * 3) / 60
+    assert worst_case_minutes < stemi["deadlineMinutes"] * 0.25, (
+        "three unanswered offers would eat a quarter of the door-to-balloon target")
+
+
 def test_a_still_raised_red_flag_does_not_restart_the_ladder():
     """
     The flag is re-evaluated on every subsequent answer and stays raised. Acting
