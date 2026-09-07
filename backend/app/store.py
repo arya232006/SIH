@@ -371,6 +371,82 @@ class SessionStore:
         self._sessions["session_seed_ramesh"] = s1
         self._save_to_sqlite(s1)
 
+        # 1b. Second emergency, deliberately a different protocol: acute stroke.
+        #
+        # With only the STEMI seeded, the dispatch ladder could never be shown
+        # working. 'cardiac_cath' is held by exactly one rostered doctor, so the
+        # moment they decline the case escalates -- correct behaviour, but it
+        # means a decline always looks like a dead end. Thrombolysis is held by
+        # three doctors on the day shift, so this case can be declined, rolled to
+        # the next candidate and accepted, which is the whole point of the
+        # reserve-and-reoffer policy.
+        s1b = PatientSession(
+            sessionId="session_seed_lakshmi",
+            patientId="ABHA-31-7742-1180-6633",
+            visitId="OPD-2026-08-25-00404",
+            tokenNumber="OPD-044",
+            patientName="Lakshmi Narayanan",
+            age=67,
+            gender="Female",
+            language="ta",
+            ayushMode=False,
+            connectivityStatus="online",
+            flaggedForStaff=False,
+            chiefComplaint="Sudden slurred speech and right-sided weakness while having breakfast",
+            historyOfPresentIllness=HistoryOfPresentIllness(
+                onset="1 hour ago, sudden onset while seated at breakfast",
+                site="Right arm and right leg, with facial asymmetry",
+                character="Sudden painless weakness, unable to grip",
+                radiation="None",
+                aggravating="None",
+                relieving="None",
+                associatedSymptoms=["Slurred speech", "Facial droop on the right",
+                                    "Unable to raise right arm"]
+            ),
+            pastMedicalHistory=["Atrial fibrillation (3 years)", "Hypertension (11 years)"],
+            drugAllergyHistory=DrugAllergyHistory(
+                currentMedications=["Tab. Amlodipine 5mg OD", "Tab. Metoprolol 25mg BD"],
+                allergies="No known drug allergies (NKDA)"
+            ),
+            familyHistory=["Mother had a stroke at 71"],
+            personalHistory=PersonalHistory(
+                diet="Vegetarian",
+                smoking="Never smoked",
+                alcohol="Never"
+            ),
+            reviewOfSystems="Neurological: Sudden focal deficit, expressive difficulty. Cardiovascular: Known AF, irregular pulse.",
+            priorInvestigations=[],
+            redFlag=RedFlag(
+                triggered=True,
+                reason="Potential Acute Stroke Warning (Sudden focal neurological deficit / slurred speech and facial droop)",
+                action="URGENT CODE STROKE: Immediate non-contrast head CT and emergency neurological consult.",
+                urgency="emergency"
+            ),
+            fieldProvenance={
+                "chiefComplaint": "patient-conversation",
+                "historyOfPresentIllness": "patient-conversation",
+                "pastMedicalHistory": "patient-conversation",
+                "drugAllergyHistory": "patient-conversation",
+            },
+            enteredByStaffId=None,
+            physicianReviewStatus="Pending confirmation",
+            physicianNotes="",
+            sectionReviews={},
+            conversationTurns=[
+                QAPair(questionId="q1", field="onset", questionText="When did the weakness start?",
+                       patientAnswer="One hour back, suddenly while eating", mode="voice", timestamp="09:40"),
+                QAPair(questionId="q2", field="deficit", questionText="Which side is affected?",
+                       patientAnswer="Right hand and right leg, speech is not clear",
+                       mode="voice", timestamp="09:41"),
+            ],
+            createdAt=now,
+            updatedAt=now,
+            status="confirmed",
+            version=1
+        )
+        self._sessions["session_seed_lakshmi"] = s1b
+        self._save_to_sqlite(s1b)
+
         # 2. AYUSH Intake Patient: Harish Patel (Hyperacidity / Pitta Prakriti)
         s2 = PatientSession(
             sessionId="session_seed_harish",

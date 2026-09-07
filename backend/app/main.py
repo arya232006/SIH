@@ -46,6 +46,10 @@ from app.services.drug_matching_service import DrugMatchingService
 
 from app.services.event_log import event_log
 from app.services.bed_service import bed_service
+# Timestamps a clinician reads must be hospital wall-clock, not the container's
+# UTC. On Render those differ by 5h30m, which put the whole emergency audit
+# trail in the wrong half of the day.
+from app.services import clock
 
 # Ensure sample images exist on disk on startup
 ocr_service.ensure_sample_images_exist()
@@ -187,7 +191,7 @@ async def submit_answer(session_id: str, req: PatientAnswerRequest):
             questionText=q_text,
             patientAnswer=req.answer,
             mode=req.mode,
-            timestamp=datetime.now().strftime("%H:%M:%S")
+            timestamp=clock.stamp()
         ))
 
     if req.medicalSystem:
@@ -395,7 +399,7 @@ async def call_triage_staff(session_id: str, req: StaffCallRequest):
         "chiefComplaint": session.chiefComplaint or "Initial intake in progress",
         "reason": session.staffCallReason,
         "kioskId": req.kioskId or "KIOSK-01",
-        "timestamp": datetime.now().strftime("%H:%M:%S")
+        "timestamp": clock.stamp()
     })
 
     return {
@@ -984,7 +988,7 @@ async def dispatch_emergency(
 
     if record.currentOffer:
         session.emergencyActionLog.append(
-            f"[{datetime.now().strftime('%H:%M:%S')}] Auto-assigned to "
+            f"[{clock.stamp()}] Auto-assigned to "
             f"{record.currentOffer.doctorName} for {record.condition}, "
             f"awaiting acceptance ({record.currentOffer.respondBySeconds}s)"
         )
@@ -1065,7 +1069,7 @@ async def decline_dispatch(
         raise HTTPException(status_code=404, detail=str(exc))
 
     session.emergencyActionLog.append(
-        f"[{datetime.now().strftime('%H:%M:%S')}] {doctor.fullName} declined "
+        f"[{clock.stamp()}] {doctor.fullName} declined "
         f"({req.reason})"
     )
     session_store.update_session(session_id, session)
@@ -1083,12 +1087,36 @@ async def decline_dispatch(
 async def get_doctor_dispatch_inbox(
     doctor: DoctorAccount = Depends(get_current_doctor)
 ):
-    """Emergency cases currently paged to the signed-in doctor."""
+    """
+    Emergency cases currently paged to the signed-in doctor.
+
+    The dispatch record alone identifies a session, not a person. A doctor
+    deciding whether to accept a case in the next ninety seconds needs to see
+    who and what, so the patient is carried alongside the record rather than
+    leaving the portal to fetch each one separately.
+    """
     for record in list(dispatch_service._records.values()):
         session = session_store.get_session(record.sessionId)
         if session:
             dispatch_service.sweep(session)
-    return dispatch_service.offers_for_doctor(doctor.doctorId)
+
+    inbox = []
+    for record in dispatch_service.offers_for_doctor(doctor.doctorId):
+        session = session_store.get_session(record.sessionId)
+        inbox.append({
+            "record": record,
+            "patient": {
+                "sessionId": record.sessionId,
+                "patientName": session.patientName if session else "Unknown patient",
+                "tokenNumber": session.tokenNumber if session else "",
+                "age": session.age if session else None,
+                "gender": session.gender if session else None,
+                "chiefComplaint": session.chiefComplaint if session else "",
+                "redFlagReason": (session.redFlag.reason
+                                  if session and session.redFlag else ""),
+            },
+        })
+    return inbox
 
 @app.get("/api/simulation/opd-economics")
 async def simulate_opd_economics(
@@ -1356,7 +1384,7 @@ async def trigger_emergency_action(session_id: str, req: EmergencyActionRequest,
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    now_str = datetime.now().strftime("%H:%M:%S")
+    now_str = clock.stamp()
     action_entry = f"[{now_str}] {req.action} by {req.dispatchedBy}"
     if req.assignedBed:
         session.assignedBed = req.assignedBed

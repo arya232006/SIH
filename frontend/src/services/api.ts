@@ -2,7 +2,8 @@ import {
   PatientRegistration, PatientSession, AdaptiveQuestion,
   RedFlag, PriorInvestigation, ConnectivityStatus, StaffAccount,
   AudioTranscriptionResponse, CDSSResponse,
-  DoctorAccount, DoctorDutyStatus, DutyState
+  DoctorAccount, DoctorDutyStatus, DutyState,
+  DispatchInboxItem, DispatchRecord
 } from '../types';
 
 const API_BASE = '/api';
@@ -392,6 +393,32 @@ export class ApiService {
   static async getDoctorRoster(): Promise<{ doctor: DoctorAccount; duty: DoctorDutyStatus }[]> {
     const res = await fetch(`${API_BASE}/doctor/roster`, { headers: this.doctorHeaders() });
     return this.handleResponse(res);
+  }
+
+  // --- Emergency dispatch, from the receiving doctor's side ---
+  // Assignment is automatic, but accountability is not: a case is only owned
+  // once the paged doctor accepts it, and declining rolls it straight to the
+  // next candidate rather than leaving it on a screen nobody is watching.
+  static async getDoctorInbox(): Promise<DispatchInboxItem[]> {
+    const res = await fetch(`${API_BASE}/doctor/inbox`, { headers: this.doctorHeaders() });
+    return this.handleResponse<DispatchInboxItem[]>(res);
+  }
+
+  static async acceptDispatch(sessionId: string): Promise<DispatchRecord> {
+    const res = await fetch(`${API_BASE}/dispatch/session/${sessionId}/accept`, {
+      method: 'POST',
+      headers: this.doctorHeaders()
+    });
+    return this.handleResponse<DispatchRecord>(res);
+  }
+
+  static async declineDispatch(sessionId: string, reason: string): Promise<DispatchRecord> {
+    const res = await fetch(`${API_BASE}/dispatch/session/${sessionId}/decline`, {
+      method: 'POST',
+      headers: this.doctorHeaders(true),
+      body: JSON.stringify({ reason })
+    });
+    return this.handleResponse<DispatchRecord>(res);
   }
 
   static async getAvailableDoctors(params: {

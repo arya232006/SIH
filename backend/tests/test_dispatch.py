@@ -35,6 +35,20 @@ def make_session(reason: str, onset: str = "", session_id: str = "sess-1") -> Pa
     return s
 
 
+# Every seeded doctor, so a test can sign in as whoever the dispatcher chose
+# rather than skipping when it picks someone unexpected.
+DOCTOR_LOGINS = {
+    "DOC-CARD-201": ("dr_banerjee", "cardio123"),
+    "DOC-CARD-202": ("dr_iyer", "cardio456"),
+    "DOC-EMER-301": ("dr_khan", "emerg123"),
+    "DOC-EMER-302": ("dr_dsouza", "emerg456"),
+    "DOC-NEUR-310": ("dr_sen", "neuro123"),
+    "DOC-GMED-101": ("dr_chandra", "genmed123"),
+    "DOC-PEDI-105": ("dr_sengupta", "pedia123"),
+    "DOC-AYUS-001": ("vaidya_sharma", "ayush123"),
+}
+
+
 def doctor_auth(username="dr_khan", password="emerg123"):
     res = client.post("/api/doctor/login", json={"username": username, "password": password})
     assert res.status_code == 200
@@ -210,6 +224,55 @@ def test_dispatch_endpoints_require_authentication():
                        json={"reason": "busy"}).status_code == 401
     assert client.get("/api/doctor/inbox").status_code == 401
     assert client.get("/api/dispatch/benchmark").status_code == 401
+
+
+@pytest.mark.real_clock
+def test_the_clock_is_the_hospitals_not_the_containers():
+    """
+    Shift windows like "08:00-20:00" are hospital wall-clock times. Reading the
+    machine clock instead put every daytime doctor off shift on Render, which
+    runs UTC -- and because an off-shift doctor's state is forced to off_duty,
+    the portal disabled every duty button except "Off Duty".
+
+    Asserted against UTC rather than the local machine, so it holds wherever
+    the suite runs; that independence is the whole point.
+    """
+    from datetime import datetime, timedelta, timezone
+    from app.services import clock
+
+    expected = (datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+                ).replace(tzinfo=None)
+    drift = abs((clock.now() - expected).total_seconds())
+    assert drift < 5, (
+        f"clock.now() is {drift:.0f}s from Indian Standard Time; it is probably "
+        f"reading the server's local time again")
+
+
+def test_the_inbox_carries_the_patient_not_just_a_session_id():
+    """
+    A doctor deciding inside a ninety-second window needs to know who and what.
+    The inbox used to return bare dispatch records, so the portal could not show
+    a name without fetching every session separately.
+    """
+    DispatchService.reset()
+    sid = _emergency_session_id()
+    record = client.post(f"/api/dispatch/session/{sid}/dispatch",
+                         headers=doctor_auth()).json()
+    paged = record["currentOffer"]["doctorId"]
+
+    username, password = DOCTOR_LOGINS[paged]
+    inbox = client.get("/api/doctor/inbox",
+                       headers=doctor_auth(username, password)).json()
+
+    assert inbox, f"case was paged to {paged} but their inbox is empty"
+    item = inbox[0]
+    assert item["record"]["sessionId"] == sid
+    patient = item["patient"]
+    assert patient["patientName"] and patient["patientName"] != "Unknown patient"
+    assert patient["tokenNumber"]
+    # The offer must explain itself; "accept this" with no reasoning is not a
+    # decision a clinician can make.
+    assert item["record"]["currentOffer"]["reasoning"]
 
 
 def test_proposal_endpoint_returns_reasoning():
