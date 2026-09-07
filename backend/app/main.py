@@ -1663,7 +1663,11 @@ _FRONTEND_DIST = os.path.join(
 # Client-side routes that must return index.html rather than 404. An explicit
 # list, not a catch-all: a catch-all route would answer every unmatched path,
 # turning genuine 404s into 200s and unknown API methods into 405s.
-_SPA_ROUTES = {"", "kiosk", "physician", "emergency", "staff"}
+# Kept in step with the <Route> paths in frontend/src/App.tsx. A test asserts
+# they match, because forgetting to add one here makes that page 404 in the
+# deployed build while working perfectly in development -- which is exactly how
+# /economics shipped unreachable.
+_SPA_ROUTES = {"", "kiosk", "physician", "emergency", "staff", "economics"}
 
 if os.path.isdir(_FRONTEND_DIST):
     from fastapi.staticfiles import StaticFiles

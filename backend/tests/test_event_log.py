@@ -406,3 +406,33 @@ def test_assumptions_are_returned_so_they_can_be_challenged():
 
 def test_economics_endpoint_requires_authentication():
     assert client.get("/api/simulation/opd-economics").status_code == 401
+
+
+def test_every_client_route_is_served_by_the_spa_fallback():
+    """
+    The deployed build serves client routes from an explicit allowlist, so a
+    React route missing from it returns 404 in production while working in
+    development. Reading the routes out of App.tsx keeps the two in step
+    without anyone having to remember.
+    """
+    import io
+    import os
+    import re
+    from app.main import _SPA_ROUTES
+
+    app_tsx = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "..", "frontend", "src", "App.tsx")
+    app_tsx = os.path.normpath(app_tsx)
+    if not os.path.exists(app_tsx):
+        import pytest
+        pytest.skip("frontend not present")
+
+    source = io.open(app_tsx, encoding="utf-8").read()
+    declared = set()
+    for path in re.findall(r'<Route\s+path="([^"]+)"', source):
+        declared.add(path.strip("/").split("/")[0])
+
+    missing = declared - _SPA_ROUTES
+    assert not missing, (
+        f"client route(s) {sorted(missing)} will 404 in the deployed build; "
+        f"add them to _SPA_ROUTES in app/main.py")
