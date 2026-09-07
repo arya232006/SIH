@@ -16,7 +16,7 @@ import { StaffTakeover } from './pages/Staff/StaffTakeover';
 import { 
   Stethoscope, UserCheck, ShieldCheck, Heart, 
   Wifi, WifiOff, Globe, Sparkles, ArrowRight, Activity, 
-  FileText, CheckCircle2, ChevronDown, Siren, AlertTriangle 
+  FileText, CheckCircle2, ChevronDown, Siren, AlertTriangle, TrendingDown 
 } from 'lucide-react';
 
 // Landing Page Component
@@ -131,6 +131,33 @@ const LandingPage: React.FC = () => {
 
         </div>
       </div>
+
+      {/* The evidence, not another feature */}
+      <Link
+        to="/economics"
+        className="block rounded-3xl p-6 bg-slate-900 border-2 border-violet-500 shadow-xl hover:shadow-2xl hover:-translate-y-0.5 transition-all group text-left"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="w-11 h-11 rounded-xl bg-violet-600 text-white flex items-center justify-center shadow-md shrink-0">
+            <TrendingDown className="w-5 h-5" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-base font-bold text-white group-hover:text-violet-300 transition-colors">
+              Does any of this actually save anything?
+            </h3>
+            <p className="text-[11px] text-slate-300 leading-relaxed mt-1 max-w-3xl">
+              A simulated outpatient day, the same patients through the same doctors,
+              with only the intake method changed. Doctor time per patient falls from
+              5.0 to 2.7 minutes. Move the assumptions yourself &mdash; including the
+              one the result is most sensitive to.
+            </p>
+          </div>
+          <div className="flex items-center text-xs font-bold text-violet-300 shrink-0">
+            <span>Open the model</span>
+            <ArrowRight className="w-3.5 h-3.5 ml-1 group-hover:translate-x-1 transition-transform" />
+          </div>
+        </div>
+      </Link>
 
       {/* Feature Highlights Grid */}
       <div className="bg-white rounded-3xl p-8 shadow-md border border-slate-200 grid grid-cols-1 md:grid-cols-4 gap-6 text-xs">
@@ -298,6 +325,14 @@ export const App: React.FC = () => {
               >
                 <UserCheck className="w-3.5 h-3.5 text-amber-400" />
                 <span>Staff Portal</span>
+              </Link>
+
+              <Link
+                to="/economics"
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors flex items-center space-x-1"
+              >
+                <TrendingDown className="w-3.5 h-3.5 text-violet-400" />
+                <span>Impact Model</span>
               </Link>
             </nav>
 
