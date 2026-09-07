@@ -1,7 +1,12 @@
 // High-Fidelity Audio and Text-to-Speech Controller for MediKiosk
 // Uses a strict singleton pattern to ensure exactly ONE clear, natural voice plays without overlapping.
 
-const API_BASE = 'http://localhost:8000/api';
+// Relative, so it resolves against whatever host is serving the kiosk. Pointing
+// at localhost meant every deployed browser asked its own machine for speech --
+// and being http:// on an https:// page, it was blocked as mixed content before
+// the request was even attempted, silencing text-to-speech everywhere but the
+// developer's laptop.
+const API_BASE = '/api';
 
 let activeAudioElement: HTMLAudioElement | null = null;
 let currentPlaybackId = 0;

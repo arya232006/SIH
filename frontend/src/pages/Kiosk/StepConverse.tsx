@@ -16,6 +16,9 @@ import { VITALS_I18N } from '../../utils/clinicalQuestionsI18n';
 import { AudioVisualizer } from '../../components/AudioVisualizer';
 import { BodyMapSelector } from '../../components/BodyMapSelector';
 import { playTextToSpeech, stopTextToSpeech } from '../../utils/sound';
+import {
+ encodeToWav, pickRecorderMimeType, microphoneSupport, describeMicError
+} from '../../utils/audioEncoding';
 import { ApiService } from '../../services/api';
 import { KioskAccessibilitySettings } from '../../components/KioskAccessibilityToolbar';
 
@@ -65,6 +68,10 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  // English rendering of the pending answer. The clinical rules match English
  // keywords, so speech in another language needs this to raise a red flag.
  const [pendingVoiceClinical, setPendingVoiceClinical] = useState<string | undefined>(undefined);
+ // Why the last voice attempt produced nothing. Failures used to be swallowed
+ // into console.warn, so a blocked microphone or an unreachable speech service
+ // looked identical to the kiosk simply ignoring the patient.
+ const [voiceError, setVoiceError] = useState<string | null>(null);
  const [detectedAccent, setDetectedAccent] = useState<string>('Indian English / Multilingual');
  const [normalizedTerms, setNormalizedTerms] = useState<string[]>([]);
  const [isCallingStaff, setIsCallingStaff] = useState<boolean>(false);
@@ -159,7 +166,6 @@ export const StepConverse: React.FC<StepConverseProps> = ({
 
  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
  const audioChunksRef = useRef<Blob[]>([]);
- const simulatedTimerRef = useRef<any>(null);
 
  // Sync selected accent with parent language changes
  useEffect(() => {
@@ -181,6 +187,7 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  setNormalizedTerms([]);
  setStaffCalledNotice(false);
  setShowNonDisclosureModal(false);
+ setVoiceError(null);
 
  // Auto-TTS if readAloud is active
  if (accessibilitySettings?.readAloud && currentQuestion?.question) {
@@ -209,10 +216,31 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  };
 
  const startRecordingSession = async () => {
+ setVoiceError(null);
+
+ const support = microphoneSupport();
+ if (!support.ok) {
+ setVoiceError(support.reason || 'The microphone is unavailable.');
+ return;
+ }
+
+ let stream: MediaStream;
+ try {
+ stream = await navigator.mediaDevices.getUserMedia({
+ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+ });
+ } catch (err) {
+ // This path used to invent an answer: it submitted the first multiple-choice
+ // option as though the patient had spoken it, with no indication anything had
+ // gone wrong. A blocked microphone must never become words on a clinical record.
+ setVoiceError(describeMicError(err));
+ return;
+ }
+
  try {
  audioChunksRef.current = [];
- const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
- const mediaRecorder = new MediaRecorder(stream);
+ const mimeType = pickRecorderMimeType();
+ const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
  mediaRecorderRef.current = mediaRecorder;
 
  mediaRecorder.ondataavailable = (event) => {
@@ -222,17 +250,26 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  };
 
  mediaRecorder.onstop = async () => {
- const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
- await handleProcessAudioBlob(audioBlob);
+ // Release the microphone before transcribing, so the recording indicator
+ // clears immediately rather than staying lit for the whole network call.
  stream.getTracks().forEach((track) => track.stop());
+ const audioBlob = new Blob(audioChunksRef.current, {
+ type: mediaRecorder.mimeType || mimeType || 'audio/webm',
+ });
+ await handleProcessAudioBlob(audioBlob);
+ };
+
+ mediaRecorder.onerror = () => {
+ stream.getTracks().forEach((track) => track.stop());
+ setIsRecording(false);
+ setVoiceError('Recording stopped unexpectedly. Please tap the mic and try again.');
  };
 
  mediaRecorder.start();
  setIsRecording(true);
- } catch (err) {
- console.warn("Microphone hardware access unavailable, using simulated voice fallback.", err);
- setIsRecording(true);
- triggerSimulatedVoiceFallback();
+ } catch (err: any) {
+ stream.getTracks().forEach((track) => track.stop());
+ setVoiceError(`Recording could not start (${err?.name || 'unknown error'}).`);
  }
  };
 
@@ -241,26 +278,71 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
  mediaRecorderRef.current.stop();
  }
- if (simulatedTimerRef.current) {
- clearTimeout(simulatedTimerRef.current);
- }
  };
 
  const handleProcessAudioBlob = async (audioBlob: Blob) => {
  setIsProcessingAudio(true);
+ setVoiceError(null);
  try {
+ if (audioBlob.size === 0) {
+ setVoiceError('Nothing was recorded. Tap the mic, speak, then tap it again to stop.');
+ return;
+ }
+
+ // Whatever the browser recorded, upload 16 kHz mono WAV: the speech
+ // providers each accept a different set of containers, and this is the
+ // one they all document.
+ let upload = audioBlob;
+ let durationSeconds = 0;
+ let peak = 1;
+ try {
+ const encoded = await encodeToWav(audioBlob);
+ upload = encoded.blob;
+ durationSeconds = encoded.durationSeconds;
+ peak = encoded.peak;
+ } catch (err) {
+ // Send the original rather than give up; it is correctly labelled, so
+ // a provider that understands this container will still handle it.
+ console.warn('WAV conversion unavailable, uploading the raw recording.', err);
+ }
+
+ if (durationSeconds > 0 && durationSeconds < 0.7) {
+ setVoiceError('That was too short to make out. Tap the mic, speak your answer, then tap it again.');
+ return;
+ }
+ if (peak < 0.01) {
+ setVoiceError('The microphone recorded silence. Check that it is not muted or covered, then try again.');
+ return;
+ }
+
  const activeId = session.sessionId || session.patientId;
- const res = await ApiService.transcribeAudio(activeId, audioBlob, selectedAccent);
- if (res.transcript) {
+ const res = await ApiService.transcribeAudio(activeId, upload, selectedAccent);
+
+ if (!res.transcript) {
+ // The service used to return a canned sentence here. Now it reports
+ // failure honestly, and that has to reach the patient rather than
+ // leaving the kiosk looking like it ignored them.
+ setVoiceError(res.error ||
+ 'No words could be made out. Please try again, or tap an answer below.');
+ return;
+ }
+
  setDetectedAccent(res.accent || 'Indian English / Hinglish');
  setNormalizedTerms(res.normalizedMedicalTerms || []);
- 
- // In Guided/Assisted Mode: show verification preview box so user can confirm or retry
- if (accessibilitySettings?.guidedMode || accessibilitySettings?.assistedMode) {
+
+ // Confirm before recording when the model itself is unsure, not only in
+ // guided mode -- a low-confidence transcript is exactly the one that
+ // should not be written to the history unread.
+ const needsConfirmation =
+ accessibilitySettings?.guidedMode ||
+ accessibilitySettings?.assistedMode ||
+ (typeof res.confidence === 'number' && res.confidence < 0.55);
+
+ if (needsConfirmation) {
  setPendingVoiceAnswer(res.transcript);
  setPendingVoiceClinical(res.clinicalText);
  setInterimTranscript(res.transcript);
- 
+
  // Audio confirmation
  const confirmPrompt = currentLang === 'hi'
  ? `आपने कहा: "${res.transcript}"। पुष्टि के लिए हरा बटन दबाएं।`
@@ -276,36 +358,13 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  res.clinicalText
  );
  }
- }
- } catch (err) {
- console.warn("Backend audio transcribe failed, using local transcript.", err);
+ } catch (err: any) {
+ setVoiceError(err?.message
+ ? `Speech could not be processed: ${err.message}`
+ : 'Speech could not be processed. Please type your answer or tap an option.');
  } finally {
  setIsProcessingAudio(false);
  }
- };
-
- const triggerSimulatedVoiceFallback = () => {
- const chosenOption =
- currentQuestion.options && currentQuestion.options.length > 0
- ? currentQuestion.options[0]
- : "Mild symptoms for 2 days";
-
- simulatedTimerRef.current = setTimeout(() => {
- setIsRecording(false);
- if (accessibilitySettings?.guidedMode || accessibilitySettings?.assistedMode) {
- setPendingVoiceAnswer(chosenOption);
- setInterimTranscript(chosenOption);
- } else {
- setInterimTranscript(chosenOption);
- onAnswerSubmit(
- chosenOption,
- 'voice',
- session.ayushMode,
- currentQuestion.field,
- currentQuestion.question
- );
- }
- }, 1800);
  };
 
  const handleConfirmPendingVoiceAnswer = () => {
@@ -327,6 +386,7 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  const handleRetryVoiceAnswer = () => {
  setPendingVoiceAnswer(null);
  setInterimTranscript('');
+ setVoiceError(null);
  startRecordingSession();
  };
 
@@ -765,6 +825,45 @@ export const StepConverse: React.FC<StepConverseProps> = ({
  </div>
  )}
  </div>
+
+ {/* Voice failure notice. Nothing was recorded and the patient is told why,
+ rather than the kiosk appearing to ignore them. */}
+ {voiceError && !isRecording && !isProcessingAudio && (
+ <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-2xl space-y-3">
+ <div className="flex items-start space-x-2.5">
+ <MicOff className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+ <div className="space-y-1">
+ <span className="text-[11px] font-black uppercase tracking-wider text-rose-800 block">
+ Voice input did not work
+ </span>
+ <p className="text-xs text-rose-900 font-medium leading-relaxed">
+ {voiceError}
+ </p>
+ <p className="text-[11px] text-rose-700">
+ Nothing has been added to your record. You can tap an answer below or
+ type it instead &mdash; both work exactly the same.
+ </p>
+ </div>
+ </div>
+ <div className="flex items-center gap-2">
+ <button
+ type="button"
+ onClick={handleRetryVoiceAnswer}
+ className="px-4 py-2.5 bg-rose-700 hover:bg-rose-800 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 min-h-[44px] cursor-pointer"
+ >
+ <RefreshCw className="w-3.5 h-3.5" />
+ <span>Try Voice Again</span>
+ </button>
+ <button
+ type="button"
+ onClick={() => setVoiceError(null)}
+ className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs rounded-xl border border-slate-300 min-h-[44px] cursor-pointer"
+ >
+ Dismiss
+ </button>
+ </div>
+ </div>
+ )}
 
  {/* Voice Confirmation Preview Box (Guided Mode / Low-Literacy Helper) */}
  {pendingVoiceAnswer && (

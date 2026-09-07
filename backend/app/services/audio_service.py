@@ -70,9 +70,24 @@ class AudioService:
 
         lang = (language_hint or "en-IN").split("-")[0].lower()
 
+        if not settings.GROQ_API_KEY and not settings.GEMINI_API_KEY:
+            print("[Audio] No speech provider is configured on this server.")
+            return cls._failed(
+                "Voice input is not available: this server has no speech "
+                "recognition service configured. Please type your answer or "
+                "tap an option, and tell the help desk. "
+                "(Set GEMINI_API_KEY or GROQ_API_KEY.)")
+
+        # Provider outages are recorded separately from "heard nothing". They are
+        # different problems with different remedies: one is a billing or key
+        # issue for the operator, the other is genuinely worth asking the patient
+        # to repeat. Telling someone to speak more clearly when the account is
+        # out of quota just makes them try, and fail, again.
+        outages: List[str] = []
+
         if settings.GROQ_API_KEY:
             try:
-                transcript, detected, confidence = await cls._groq_transcribe(
+                transcript, detected, confidence, problem = await cls._groq_transcribe(
                     audio_bytes, filename, content_type, lang)
                 if transcript:
                     clinical = transcript
@@ -90,26 +105,40 @@ class AudioService:
                         source="whisper",
                         normalizedMedicalTerms=cls._extract_normalized_concepts(clinical),
                     )
+                if problem:
+                    outages.append(f"Whisper: {problem}")
             except Exception as e:
+                outages.append(f"Whisper unreachable ({type(e).__name__})")
                 print(f"[Whisper Transcribe Error] {type(e).__name__}: {e}")
 
         if settings.GEMINI_API_KEY:
             try:
-                result = await cls._gemini_transcribe(
+                result, problem = await cls._gemini_transcribe(
                     audio_bytes, content_type, language_hint, accent_hint)
                 if result:
                     return result
+                if problem:
+                    outages.append(f"Gemini: {problem}")
             except Exception as e:
+                outages.append(f"Gemini unreachable ({type(e).__name__})")
                 print(f"[Gemini Audio Error] {type(e).__name__}: {e}")
 
         # No fabricated transcript. This previously returned a canned sentence
         # with 0.91 confidence, so a patient describing chest pain could be
         # recorded as having acid reflux -- and that text became the chief
         # complaint driving red flags, routing and the whole downstream summary.
-        print("[Audio] No speech provider available or all failed.")
+        if outages:
+            detail = "; ".join(outages)
+            print(f"[Audio] Every speech provider failed -- {detail}")
+            return cls._failed(
+                "The speech service is unavailable right now, so nothing was "
+                "recorded. Please type your answer or tap an option, and tell "
+                f"the help desk. ({detail})")
+
+        print("[Audio] Providers responded but no speech was recognised.")
         return cls._failed(
-            "Speech could not be transcribed. No words have been recorded. "
-            "Please try again, or answer by tapping an option.")
+            "No words could be made out in the recording. Please speak a little "
+            "closer to the microphone and try again, or tap an answer instead.")
 
     @classmethod
     def _failed(cls, message: str) -> AudioTranscriptionResponse:
@@ -119,9 +148,34 @@ class AudioService:
             normalizedMedicalTerms=[], error=message,
         )
 
+    @staticmethod
+    def _describe_http(status: int, body: str) -> str:
+        """
+        Turns a provider's HTTP failure into something an operator can act on.
+
+        The distinction that matters is billing/credentials versus a bad request:
+        the first needs somebody to log into a console, the second is our bug.
+        """
+        lowered = (body or "").lower()
+        if status in (401, 403):
+            return "the API key was rejected"
+        if status == 429 or "quota" in lowered or "rate limit" in lowered:
+            return "the account is out of quota or rate limited"
+        if "restricted" in lowered:
+            return "the account has been restricted by the provider"
+        if status == 400:
+            return f"the request was rejected ({body[:80].strip()})"
+        return f"HTTP {status}"
+
     @classmethod
     async def _groq_transcribe(cls, audio_bytes, filename, content_type, lang):
-        """Verbatim transcription. Returns (text, detected_language, confidence)."""
+        """
+        Verbatim transcription.
+
+        Returns (text, detected_language, confidence, problem), where `problem`
+        is set only when the provider itself failed rather than simply hearing
+        nothing worth transcribing.
+        """
         data = {
             "model": "whisper-large-v3",
             # Priming the decoder with terms it would otherwise mangle.
@@ -146,11 +200,11 @@ class AudioService:
                 data=data)
             if resp.status_code != 200:
                 print(f"[Whisper] HTTP {resp.status_code}: {resp.text[:200]}")
-                return "", "", 0.0
+                return "", "", 0.0, cls._describe_http(resp.status_code, resp.text)
             body = resp.json()
             text = (body.get("text") or "").strip()
             detected = (body.get("language") or "").lower()[:2]
-            return text, detected, cls._confidence_from(body)
+            return text, detected, cls._confidence_from(body), None
 
     @classmethod
     async def _groq_translate(cls, audio_bytes, filename, content_type) -> str:
@@ -193,32 +247,55 @@ class AudioService:
             score *= (1.0 - min(0.9, sum(no_speech) / len(no_speech)))
         return round(max(0.05, min(0.99, score)), 2)
 
+    # Audio containers Gemini accepts as inline data. A browser recording is
+    # WebM or MP4, neither of which is on this list, so the kiosk converts to
+    # WAV before uploading -- but a stray content type must not be forwarded
+    # blindly, because the rejection looks identical to silence.
+    GEMINI_AUDIO_MIME = {
+        "audio/wav": "audio/wav", "audio/x-wav": "audio/wav",
+        "audio/wave": "audio/wav", "audio/vnd.wave": "audio/wav",
+        "audio/mp3": "audio/mp3", "audio/mpeg": "audio/mp3",
+        "audio/aiff": "audio/aiff", "audio/aac": "audio/aac",
+        "audio/ogg": "audio/ogg", "audio/flac": "audio/flac",
+    }
+
     @classmethod
     async def _gemini_transcribe(cls, audio_bytes, content_type, language_hint,
-                                 accent_hint) -> Optional[AudioTranscriptionResponse]:
+                                 accent_hint):
         """
         Fallback when Groq is unavailable. Asked for the verbatim words and an
         English rendering in one response, so the clinical engines still have
         something to match on for non-English speech.
+
+        Returns (response, problem); `problem` is set only for provider failures.
         """
-        prompt = """You are a multilingual Indian medical speech recogniser for a hospital intake kiosk.
-The audio is a patient describing symptoms, in Indian English, Hindi, Bengali, Tamil, Telugu or Hinglish.
+        mime = cls.GEMINI_AUDIO_MIME.get(
+            (content_type or "").split(";")[0].strip().lower())
+        if not mime:
+            return None, (f"cannot read {content_type or 'unknown'} audio "
+                          f"(supported: {', '.join(sorted(set(cls.GEMINI_AUDIO_MIME.values())))})")
+
+        spoken = cls.ACCENT_MAPPINGS.get(language_hint, "an Indian language")
+        prompt = f"""You are a multilingual Indian medical speech recogniser for a hospital intake kiosk.
+The audio is a patient describing symptoms. The kiosk is set to {spoken}, but the
+patient may speak any of Indian English, Hindi, Bengali, Tamil, Telugu or Hinglish.
 
 Return STRICT JSON only:
-{
+{{
   "transcript": "exact words spoken, in the language spoken",
   "english": "faithful English rendering of the same words",
   "detected_language": "en | hi | bn | ta | te",
   "confidence": 0.0 to 1.0
-}
-Transcribe only what was said. If the audio is unintelligible, return an empty transcript."""
+}}
+Transcribe only what was said. Never guess at symptoms that were not spoken.
+If the audio is unintelligible or silent, return an empty transcript."""
 
         url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
                f"{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}")
         payload = {
             "contents": [{"role": "user", "parts": [
                 {"text": prompt},
-                {"inline_data": {"mime_type": content_type,
+                {"inline_data": {"mime_type": mime,
                                  "data": base64.b64encode(audio_bytes).decode("utf-8")}},
             ]}],
             "generationConfig": {"temperature": 0.0, "response_mime_type": "application/json"},
@@ -227,13 +304,17 @@ Transcribe only what was said. If the audio is unintelligible, return an empty t
             resp = await client.post(url, json=payload)
             if resp.status_code != 200:
                 print(f"[Gemini Audio] HTTP {resp.status_code}: {resp.text[:200]}")
-                return None
-            raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-            data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+                return None, cls._describe_http(resp.status_code, resp.text)
+            try:
+                raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+                data = json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+            except (KeyError, IndexError, ValueError) as e:
+                print(f"[Gemini Audio] unparseable response: {type(e).__name__}: {e}")
+                return None, "the response could not be read"
 
         transcript = (data.get("transcript") or "").strip()
         if not transcript:
-            return None
+            return None, None          # heard nothing; not a provider failure
         english = (data.get("english") or "").strip()
         detected = (data.get("detected_language") or "en").lower()[:2]
         return AudioTranscriptionResponse(
@@ -244,7 +325,7 @@ Transcribe only what was said. If the audio is unintelligible, return an empty t
             confidence=float(data.get("confidence", 0.8)),
             source="gemini_audio",
             normalizedMedicalTerms=cls._extract_normalized_concepts(english or transcript),
-        )
+        ), None
 
     @classmethod
     async def synthesize_speech(cls, text: str, language: str = "en") -> bytes:

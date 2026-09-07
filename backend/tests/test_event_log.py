@@ -436,3 +436,38 @@ def test_every_client_route_is_served_by_the_spa_fallback():
     assert not missing, (
         f"client route(s) {sorted(missing)} will 404 in the deployed build; "
         f"add them to _SPA_ROUTES in app/main.py")
+
+
+def test_no_frontend_source_calls_the_api_on_a_hardcoded_host():
+    """
+    A hardcoded http://localhost:8000 works perfectly on the developer's laptop
+    and fails for every real user: the browser asks its own machine, and an
+    http:// call from an https:// page is blocked as mixed content before it is
+    even attempted. That is how text-to-speech and the medication clarifier
+    shipped dead while testing green locally.
+    """
+    import io
+    import os
+    import re
+
+    src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "..", "frontend", "src")
+    src = os.path.normpath(src)
+    if not os.path.isdir(src):
+        import pytest
+        pytest.skip("frontend not present")
+
+    hardcoded = re.compile(r"https?://(localhost|127\.0\.0\.1)(:\d+)?/api")
+    offenders = []
+    for root, _dirs, files in os.walk(src):
+        for name in files:
+            if not name.endswith((".ts", ".tsx")):
+                continue
+            path = os.path.join(root, name)
+            for lineno, line in enumerate(io.open(path, encoding="utf-8"), 1):
+                if hardcoded.search(line):
+                    offenders.append(f"{os.path.relpath(path, src)}:{lineno}")
+
+    assert not offenders, (
+        "these call the API on a hardcoded host and will fail once deployed; "
+        f"use a relative '/api' path instead: {offenders}")

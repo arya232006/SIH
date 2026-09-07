@@ -2,7 +2,8 @@ import {
   PatientRegistration, PatientSession, AdaptiveQuestion,
   RedFlag, PriorInvestigation, ConnectivityStatus, StaffAccount,
   AudioTranscriptionResponse, CDSSResponse,
-  DoctorAccount, DoctorDutyStatus, DutyState
+  DoctorAccount, DoctorDutyStatus, DutyState,
+  DispatchInboxItem, DispatchRecord
 } from '../types';
 
 const API_BASE = '/api';
@@ -140,7 +141,17 @@ export class ApiService {
     accentHint?: string
   ): Promise<AudioTranscriptionResponse> {
     const formData = new FormData();
-    formData.append('file', audioBlob, 'voice_recording.webm');
+    // The filename extension and the blob's type must both match what is really
+    // inside it. Speech providers dispatch on each of them, and a WAV announced
+    // as .webm is rejected before a single word is read -- which is exactly how
+    // every recording from Safari used to fail.
+    const mime = (audioBlob.type || 'audio/wav').split(';')[0].trim();
+    const extension = ({
+      'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
+      'audio/webm': 'webm', 'audio/ogg': 'ogg', 'audio/mp4': 'mp4',
+      'audio/mpeg': 'mp3', 'audio/aac': 'aac', 'audio/flac': 'flac',
+    } as Record<string, string>)[mime] || 'wav';
+    formData.append('file', audioBlob, `voice_recording.${extension}`);
     const query = new URLSearchParams({ languageHint });
     if (accentHint) query.append('accentHint', accentHint);
     
@@ -382,6 +393,32 @@ export class ApiService {
   static async getDoctorRoster(): Promise<{ doctor: DoctorAccount; duty: DoctorDutyStatus }[]> {
     const res = await fetch(`${API_BASE}/doctor/roster`, { headers: this.doctorHeaders() });
     return this.handleResponse(res);
+  }
+
+  // --- Emergency dispatch, from the receiving doctor's side ---
+  // Assignment is automatic, but accountability is not: a case is only owned
+  // once the paged doctor accepts it, and declining rolls it straight to the
+  // next candidate rather than leaving it on a screen nobody is watching.
+  static async getDoctorInbox(): Promise<DispatchInboxItem[]> {
+    const res = await fetch(`${API_BASE}/doctor/inbox`, { headers: this.doctorHeaders() });
+    return this.handleResponse<DispatchInboxItem[]>(res);
+  }
+
+  static async acceptDispatch(sessionId: string): Promise<DispatchRecord> {
+    const res = await fetch(`${API_BASE}/dispatch/session/${sessionId}/accept`, {
+      method: 'POST',
+      headers: this.doctorHeaders()
+    });
+    return this.handleResponse<DispatchRecord>(res);
+  }
+
+  static async declineDispatch(sessionId: string, reason: string): Promise<DispatchRecord> {
+    const res = await fetch(`${API_BASE}/dispatch/session/${sessionId}/decline`, {
+      method: 'POST',
+      headers: this.doctorHeaders(true),
+      body: JSON.stringify({ reason })
+    });
+    return this.handleResponse<DispatchRecord>(res);
   }
 
   static async getAvailableDoctors(params: {

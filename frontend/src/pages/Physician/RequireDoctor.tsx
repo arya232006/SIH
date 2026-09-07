@@ -6,6 +6,7 @@ import {
 import { DoctorAccount, DoctorDutyStatus, DutyState } from '../../types';
 import { ApiService } from '../../services/api';
 import { DoctorLogin } from './DoctorLogin';
+import { DispatchInbox } from './DispatchInbox';
 
 interface RequireDoctorProps {
   children: React.ReactNode;
@@ -29,6 +30,7 @@ export const RequireDoctor: React.FC<RequireDoctorProps> = ({ children }) => {
   const [doctor, setDoctor] = useState<DoctorAccount | null>(() => ApiService.getDoctorAccount());
   const [duty, setDuty] = useState<DoctorDutyStatus | null>(null);
   const [isVerifying, setIsVerifying] = useState<boolean>(!!ApiService.getDoctorAccount());
+  const [dutyError, setDutyError] = useState<string | null>(null);
 
   const verifySession = useCallback(async () => {
     if (!ApiService.getDoctorToken()) {
@@ -67,11 +69,22 @@ export const RequireDoctor: React.FC<RequireDoctorProps> = ({ children }) => {
   };
 
   const handleDutyChange = async (next: DutyState) => {
+    setDutyError(null);
     try {
       const res = await ApiService.setDoctorDuty(next);
       setDuty(res.duty);
-    } catch (err) {
-      console.error('Failed to update duty state:', err);
+      // The roster is authoritative: a state set outside the shift window is
+      // overridden back to off_duty on read. Saying so beats a button that
+      // appears to do nothing.
+      if (res.duty.dutyState !== next) {
+        setDutyError(
+          `Kept as "${res.duty.dutyState.replace('_', ' ')}" — the shift window ` +
+          `is ${res.duty.shiftStart}–${res.duty.shiftEnd} and it is outside that now, ` +
+          `so emergency dispatch will not page you.`
+        );
+      }
+    } catch (err: any) {
+      setDutyError(err?.message || 'Could not update duty state.');
     }
   };
 
@@ -142,7 +155,11 @@ export const RequireDoctor: React.FC<RequireDoctorProps> = ({ children }) => {
                     key={opt.value}
                     type="button"
                     onClick={() => handleDutyChange(opt.value)}
-                    title={opt.label}
+                    title={
+                      !duty?.onShift && opt.value !== 'off_duty'
+                        ? `Outside your ${duty?.shiftStart}–${duty?.shiftEnd} shift, so this cannot be set`
+                        : opt.label
+                    }
                     disabled={!duty?.onShift && opt.value !== 'off_duty'}
                     className={`px-2.5 py-1.5 text-[11px] font-bold flex items-center space-x-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                       active ? `${opt.tone} text-white` : 'bg-white text-slate-600 hover:bg-slate-50'
@@ -166,7 +183,23 @@ export const RequireDoctor: React.FC<RequireDoctorProps> = ({ children }) => {
           </div>
 
         </div>
+
+        {dutyError && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-2.5">
+            <div className="flex items-start justify-between gap-3 p-2.5 bg-amber-50 border border-amber-300 rounded-xl text-[11px] text-amber-900">
+              <span className="font-medium">{dutyError}</span>
+              <button type="button" onClick={() => setDutyError(null)}
+                      className="font-bold text-amber-700 hover:text-amber-900 shrink-0">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Emergency cases paged to this doctor, above whatever page they are on:
+          an offer with a ninety-second window must not be missable. */}
+      <DispatchInbox onChanged={verifySession} />
 
       {children}
     </div>

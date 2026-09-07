@@ -429,6 +429,61 @@ export interface DoctorDutyStatus {
   acuityLoad: number;
 }
 
+// --- Emergency dispatch ---
+// A case is offered to one doctor at a time with a deadline to respond. It is
+// not theirs until they accept; a decline or a silence rolls it onward, and the
+// ladder of who was asked and why is kept on the record.
+export interface DispatchDeadline {
+  label: string;
+  targetMinutes: number;
+  anchor: 'arrival' | 'onset';
+  elapsedMinutes: number;
+  remainingMinutes: number;
+  breached: boolean;
+  basis: string;
+}
+
+export interface DispatchOffer {
+  doctorId: string;
+  doctorName: string;
+  offeredAt: string;
+  respondBySeconds: number;
+  status: 'pending' | 'accepted' | 'declined' | 'expired';
+  declineReason?: string | null;
+  respondedAt?: string | null;
+  reasoning: string[];
+}
+
+export interface DispatchRecord {
+  sessionId: string;
+  condition: string;
+  requiredPrivilege: string;
+  acuityWeight: number;
+  deadline?: DispatchDeadline | null;
+  status: 'pending' | 'accepted' | 'escalated';
+  currentOffer?: DispatchOffer | null;
+  history: DispatchOffer[];
+  declinedDoctorIds: string[];
+  acceptedByDoctorId?: string | null;
+  acceptedByName?: string | null;
+  acceptedAt?: string | null;
+  escalation: string[];
+  rationale: string;
+}
+
+export interface DispatchInboxItem {
+  record: DispatchRecord;
+  patient: {
+    sessionId: string;
+    patientName: string;
+    tokenNumber: string;
+    age?: number | null;
+    gender?: string | null;
+    chiefComplaint: string;
+    redFlagReason: string;
+  };
+}
+
 export interface DifferentialDiagnosis {
   condition: string;
   icd10?: string;
