@@ -460,7 +460,7 @@ class OCRService:
         source = "sample_curated"
 
         # If live Vision key is set, try real extraction
-        if settings.GEMINI_API_KEY and os.path.exists(preview_path):
+        if (settings.OPENAI_API_KEY or settings.GEMINI_API_KEY) and os.path.exists(preview_path):
             try:
                 with open(preview_path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -1134,14 +1134,10 @@ class OCRService:
         embedded_text: str = ""
     ) -> Tuple[Dict[str, Any], float, str, Optional[str], str]:
         """
-        Calls Vision-LLM (Gemini / Groq / OpenRouter) to transcribe and extract structured fields.
+        Calls Vision-LLM (OpenAI / Gemini / Groq) to transcribe and extract structured fields.
         Fine-tuned prompt specifically handles Indian doctor handwriting, margins, and drug brands.
         """
-        # 1. Gemini Vision
-        if settings.GEMINI_API_KEY:
-            try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
-                prompt = f"""
+        prompt = f"""
 You are an expert clinical OCR and medical document parsing AI for MediKiosk, specializing in Indian doctor handwriting, OPD prescriptions, and diagnostic lab reports.
 
 Analyze this medical document carefully:
@@ -1202,6 +1198,60 @@ OUTPUT STRICT JSON ONLY:
   }}
 }}
 """
+
+        # 1. OpenAI Vision (gpt-4o-mini)
+        if settings.OPENAI_API_KEY:
+            try:
+                url = "https://api.openai.com/v1/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                payload = {
+                    "model": settings.OPENAI_MODEL,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{mime_type};base64,{b64_data}"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.1
+                }
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code != 200:
+                        print(f"[Vision LLM] OpenAI returned HTTP {resp.status_code}: {resp.text[:300]}")
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        text = data["choices"][0]["message"]["content"]
+                        parsed = json.loads(text)
+                        
+                        raw_doc_type = parsed.get("document_type", "other")
+                        normalized_extracted, doc_type = cls._normalize_extracted_payload(parsed, raw_doc_type)
+                        
+                        return (
+                            normalized_extracted,
+                            float(parsed.get("confidence", 0.85)),
+                            doc_type,
+                            parsed.get("flag"),
+                            "vision_llm"
+                        )
+            except Exception as e:
+                print(f"[OpenAI Vision LLM Error] {type(e).__name__}: {e}")
+
+        # 2. Gemini Vision
+        if settings.GEMINI_API_KEY:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
                 payload = {
                     "contents": [
                         {
@@ -1221,16 +1271,10 @@ OUTPUT STRICT JSON ONLY:
                         "response_mime_type": "application/json"
                     }
                 }
-                # Vision on a full-resolution handwritten prescription regularly
-                # takes longer than 15s. A timeout here used to look like an
-                # unreadable document rather than a call that never finished.
                 async with httpx.AsyncClient(timeout=90.0) as client:
                     resp = await client.post(url, json=payload)
                     if resp.status_code != 200:
-                        # Rate limits, invalid keys and quota errors all land here.
-                        # Previously they fell through in complete silence.
-                        print(f"[Vision LLM] Gemini returned HTTP {resp.status_code}: "
-                              f"{resp.text[:300]}")
+                        print(f"[Vision LLM] Gemini returned HTTP {resp.status_code}: {resp.text[:300]}")
                     if resp.status_code == 200:
                         data = resp.json()
                         text = data["candidates"][0]["content"]["parts"][0]["text"]
@@ -1247,10 +1291,9 @@ OUTPUT STRICT JSON ONLY:
                             "vision_llm"
                         )
             except Exception as e:
-                print(f"[Vision LLM Error] {type(e).__name__}: {e}")
-        elif not settings.GEMINI_API_KEY:
-            print("[Vision LLM] No GEMINI_API_KEY set -- image OCR is unavailable. "
-                  "Groq and OpenRouter run text-only models and cannot read an image.")
+                print(f"[Gemini Vision LLM Error] {type(e).__name__}: {e}")
+        elif not settings.OPENAI_API_KEY and not settings.GEMINI_API_KEY:
+            print("[Vision LLM] Neither OPENAI_API_KEY nor GEMINI_API_KEY is set -- image OCR is unavailable.")
 
         return ({}, 0.0, "other", None, "local_ocr_fallback")
 

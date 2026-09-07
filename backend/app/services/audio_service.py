@@ -70,13 +70,13 @@ class AudioService:
 
         lang = (language_hint or "en-IN").split("-")[0].lower()
 
-        if not settings.GROQ_API_KEY and not settings.GEMINI_API_KEY:
+        if not settings.OPENAI_API_KEY and not settings.GROQ_API_KEY and not settings.GEMINI_API_KEY:
             print("[Audio] No speech provider is configured on this server.")
             return cls._failed(
                 "Voice input is not available: this server has no speech "
                 "recognition service configured. Please type your answer or "
                 "tap an option, and tell the help desk. "
-                "(Set GEMINI_API_KEY or GROQ_API_KEY.)")
+                "(Set OPENAI_API_KEY, GROQ_API_KEY, or GEMINI_API_KEY.)")
 
         # Provider outages are recorded separately from "heard nothing". They are
         # different problems with different remedies: one is a billing or key
@@ -84,6 +84,32 @@ class AudioService:
         # to repeat. Telling someone to speak more clearly when the account is
         # out of quota just makes them try, and fail, again.
         outages: List[str] = []
+
+        if settings.OPENAI_API_KEY:
+            try:
+                transcript, detected, confidence, problem = await cls._openai_transcribe(
+                    audio_bytes, filename, content_type, lang)
+                if transcript:
+                    clinical = transcript
+                    # Only pay for a second call when the speech was not English.
+                    if detected and detected != "en":
+                        clinical = await cls._openai_translate(
+                            audio_bytes, filename, content_type) or transcript
+                    return AudioTranscriptionResponse(
+                        transcript=transcript,
+                        clinicalText=clinical if clinical != transcript else None,
+                        detectedLanguage=f"{detected or lang}-IN",
+                        accent=accent_hint or cls.ACCENT_MAPPINGS.get(
+                            language_hint, "Indian English / Hinglish"),
+                        confidence=confidence,
+                        source="openai_whisper",
+                        normalizedMedicalTerms=cls._extract_normalized_concepts(clinical),
+                    )
+                if problem:
+                    outages.append(f"OpenAI Whisper: {problem}")
+            except Exception as e:
+                outages.append(f"OpenAI Whisper unreachable ({type(e).__name__})")
+                print(f"[OpenAI Whisper Transcribe Error] {type(e).__name__}: {e}")
 
         if settings.GROQ_API_KEY:
             try:
@@ -166,6 +192,52 @@ class AudioService:
         if status == 400:
             return f"the request was rejected ({body[:80].strip()})"
         return f"HTTP {status}"
+
+    @classmethod
+    async def _openai_transcribe(cls, audio_bytes, filename, content_type, lang):
+        """
+        Verbatim transcription via OpenAI Whisper.
+        """
+        data = {
+            "model": settings.OPENAI_AUDIO_MODEL,
+            "prompt": ("Indian OPD hospital intake: chest pain, blood pressure, sugar, "
+                       "cough, fever, vomiting, jalan, ghabrahat, saans, seene mein dard, "
+                       "bukhar, dolo 650, metformin, telma."),
+            "temperature": "0.0",
+            "response_format": "verbose_json",
+        }
+        if lang and lang != "auto":
+            data["language"] = lang
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+                files={"file": (filename, audio_bytes, content_type)},
+                data=data)
+            if resp.status_code != 200:
+                print(f"[OpenAI Audio] HTTP {resp.status_code}: {resp.text[:200]}")
+                return "", "", 0.0, cls._describe_http(resp.status_code, resp.text)
+            body = resp.json()
+            text = (body.get("text") or "").strip()
+            detected = (body.get("language") or "").lower()[:2]
+            return text, detected, cls._confidence_from(body), None
+
+    @classmethod
+    async def _openai_translate(cls, audio_bytes, filename, content_type) -> str:
+        """
+        English rendering via OpenAI Whisper translation endpoint.
+        """
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/audio/translations",
+                headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+                files={"file": (filename, audio_bytes, content_type)},
+                data={"model": settings.OPENAI_AUDIO_MODEL, "temperature": "0.0"})
+            if resp.status_code != 200:
+                print(f"[OpenAI Audio translate] HTTP {resp.status_code}: {resp.text[:200]}")
+                return ""
+            return (resp.json().get("text") or "").strip()
 
     @classmethod
     async def _groq_transcribe(cls, audio_bytes, filename, content_type, lang):

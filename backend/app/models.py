@@ -62,7 +62,7 @@ class AudioTranscriptionResponse(BaseModel):
     detectedLanguage: str = "en-IN"
     accent: Optional[str] = "Indian English"
     confidence: float = 0.95
-    source: Literal["whisper", "gemini_audio", "browser_native", "simulated",
+    source: Literal["openai", "openai_whisper", "whisper", "gemini_audio", "browser_native", "simulated",
                     "indic_conformer", "transcription_failed"] = "browser_native"
     normalizedMedicalTerms: List[str] = Field(default_factory=list)
     error: Optional[str] = None
@@ -603,7 +603,7 @@ class CDSSResponse(BaseModel):
     keyPointsToNotice: List[str] = Field(default_factory=list)
     recommendedInvestigations: List[str] = Field(default_factory=list)
     clinicalRationale: str = ""
-    source: Literal["gemini", "groq", "openrouter", "guideline_rules"] = "guideline_rules"
+    source: Literal["openai", "gemini", "groq", "openrouter", "guideline_rules"] = "guideline_rules"
     disclaimer: str = "AI Clinical Decision Support for doctor guidance only. Prescriptions and diagnoses are subject to attending physician's clinical discretion."
 
 # Rebuild models with forward references

@@ -460,8 +460,27 @@ SAFETY RULES:
 
     @classmethod
     async def _call_llm_provider(cls, system_prompt: str, user_prompt: str) -> Optional[str]:
-        """Calls active LLM provider (Gemini or Groq) if configured."""
+        """Calls active LLM provider (OpenAI, Gemini, or Groq) if configured."""
         provider = settings.LLM_PROVIDER
+
+        if (provider == "openai" or (not settings.GEMINI_API_KEY and settings.OPENAI_API_KEY)) and settings.OPENAI_API_KEY:
+            try:
+                url = "https://api.openai.com/v1/chat/completions"
+                headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}", "Content-Type": "application/json"}
+                payload = {
+                    "model": settings.OPENAI_MODEL,
+                    "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                    "temperature": 0.2,
+                    "response_format": {"type": "json_object"}
+                }
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(url, headers=headers, json=payload)
+                    if resp.status_code == 200:
+                        return resp.json()["choices"][0]["message"]["content"]
+                    else:
+                        print(f"[OpenAI Call Failed] HTTP {resp.status_code}: {resp.text[:200]}")
+            except Exception as e:
+                print(f"[OpenAI Call Failed]: {e}")
         
         if provider == "gemini" and settings.GEMINI_API_KEY:
             try:
@@ -477,7 +496,7 @@ SAFETY RULES:
             except Exception as e:
                 print(f"[Gemini Call Failed]: {e}")
 
-        if (provider == "groq" or (not settings.GEMINI_API_KEY and settings.GROQ_API_KEY)) and settings.GROQ_API_KEY:
+        if (provider == "groq" or (not settings.OPENAI_API_KEY and not settings.GEMINI_API_KEY and settings.GROQ_API_KEY)) and settings.GROQ_API_KEY:
             try:
                 url = "https://api.groq.com/openai/v1/chat/completions"
                 headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}", "Content-Type": "application/json"}
@@ -896,7 +915,7 @@ Generate comprehensive evidence-based Differential Diagnoses, practical Indian O
                         keyPointsToNotice=data.get("keyPointsToNotice", ["Verify vital signs & perform targeted physical examination"]),
                         recommendedInvestigations=data.get("recommendedInvestigations", ["Routine baseline evaluation as indicated"]),
                         clinicalRationale=data.get("clinicalRationale", "AI clinical decision support synthesized for attending physician review."),
-                        source=settings.LLM_PROVIDER if getattr(settings, 'LLM_PROVIDER', None) in ["gemini", "groq", "openrouter"] else "guideline_rules",
+                        source=settings.LLM_PROVIDER if getattr(settings, 'LLM_PROVIDER', None) in ["openai", "gemini", "groq", "openrouter"] else "guideline_rules",
                         disclaimer="AI Clinical Decision Support for doctor guidance only. Prescriptions and diagnoses are subject to attending physician's clinical discretion."
                     )
             except Exception as parse_err:

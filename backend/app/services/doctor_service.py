@@ -136,6 +136,24 @@ class DoctorService:
                 onCall=d["onCall"],
             )
 
+    def reset_duty(self) -> None:
+        """
+        Returns the roster to the start of a shift: nobody holding a case, and
+        nobody having reported their own state.
+
+        The roster is process-wide, like the bed board. Now that an emergency
+        pages a doctor by itself, case load accumulates across a whole test
+        session and quietly changes who scores best, so tests need to be able to
+        put it back. Credentials and shift windows are configuration and are
+        deliberately left alone.
+        """
+        for doctor_id, duty in self._duty.items():
+            duty.activeCaseCount = 0
+            duty.acuityLoad = 0.0
+            duty.dutyState = "available"
+            duty.interruptible = True
+        self._explicit_state.clear()
+
     # --- Authentication -------------------------------------------------
 
     def authenticate(self, username: str, password: str) -> Optional[Tuple[str, DoctorAccount]]:

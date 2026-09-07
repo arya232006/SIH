@@ -650,6 +650,97 @@ class DispatchService:
             return cls._escalate(record, session, now)
         return cls._offer_to(record, nxt, now)
 
+    # --- Starting the ladder ------------------------------------------------
+
+    @classmethod
+    async def dispatch_and_announce(cls, session, now=None):
+        """
+        Page the best candidate and record the fact, for the endpoint and the
+        automatic trigger alike, so a case behaves identically however it began.
+        """
+        from app.services.event_log import event_log
+        from app.store import session_store
+
+        now = now or clock.now()
+        record = cls.dispatch(session, now)
+
+        if record.currentOffer:
+            session.emergencyActionLog.append(
+                f"[{now.strftime('%H:%M:%S')}] Auto-assigned to "
+                f"{record.currentOffer.doctorName} for {record.condition}, "
+                f"awaiting acceptance ({record.currentOffer.respondBySeconds}s)")
+            session_store.update_session(session.sessionId, session)
+            await event_log.emit(
+                "emergency_dispatch_offered",
+                {"sessionId": session.sessionId, "tokenNumber": session.tokenNumber,
+                 "patientName": session.patientName,
+                 "doctorId": record.currentOffer.doctorId,
+                 "doctorName": record.currentOffer.doctorName,
+                 "condition": record.condition,
+                 "respondBySeconds": record.currentOffer.respondBySeconds},
+                actor="policy:dispatch", sessionId=session.sessionId)
+        else:
+            session.emergencyActionLog.append(
+                f"[{now.strftime('%H:%M:%S')}] No doctor holds "
+                f"'{record.requiredPrivilege}' for {record.condition}; escalated.")
+            session_store.update_session(session.sessionId, session)
+            await event_log.emit(
+                "dispatch.escalated",
+                {"sessionId": session.sessionId, "condition": record.condition,
+                 "requiredPrivilege": record.requiredPrivilege,
+                 "escalation": record.escalation},
+                actor="policy:dispatch", sessionId=session.sessionId)
+        return record
+
+    @classmethod
+    async def on_red_flag_raised(cls, event) -> None:
+        """
+        A clinical emergency pages a doctor without anyone pressing a button.
+
+        The whole ladder -- protocol selection, deadline, candidate scoring,
+        reserve policy, offer, accept, decline, cascade -- was built and then
+        never started. dispatch() was reachable only from an endpoint that no
+        screen called, so the kiosk raised a red flag, the dashboard lit up, and
+        nobody was ever paged. There was consequently never an assignment for a
+        doctor to accept or refuse.
+        """
+        from app.store import session_store
+
+        payload = event.payload or {}
+        session_id = payload.get("sessionId") or event.sessionId
+        if not session_id:
+            return
+        # The flag is re-evaluated on every subsequent answer and stays raised.
+        # Dispatching again would restart the ladder and re-page a doctor who is
+        # already on their way.
+        if cls.record_for(session_id) is not None:
+            return
+
+        session = session_store.get_session(session_id)
+        if not session or not session.redFlag or not session.redFlag.triggered:
+            return
+        await cls.dispatch_and_announce(session)
+
+    @classmethod
+    async def dispatch_open_emergencies(cls) -> int:
+        """
+        Pages doctors for red-flagged cases that predate this process.
+
+        Seeded and restored sessions never emitted a red-flag event, so without
+        this a restarted service shows emergencies in the queue that no doctor
+        has been asked about.
+        """
+        from app.store import session_store
+
+        count = 0
+        for session in session_store.list_all_sessions():
+            if (session.redFlag and session.redFlag.triggered
+                    and session.status != "completed"
+                    and cls.record_for(session.sessionId) is None):
+                await cls.dispatch_and_announce(session)
+                count += 1
+        return count
+
     # --- Reacting to the roster changing ------------------------------------
 
     @classmethod

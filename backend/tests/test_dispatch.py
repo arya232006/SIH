@@ -226,6 +226,57 @@ def test_dispatch_endpoints_require_authentication():
     assert client.get("/api/dispatch/benchmark").status_code == 401
 
 
+def test_a_red_flag_pages_a_doctor_without_anyone_pressing_a_button():
+    """
+    The whole ladder was built and never started. dispatch() was reachable only
+    from an endpoint no screen called, so the kiosk raised a red flag, the staff
+    dashboard lit up, and no doctor was ever paged -- which meant there was never
+    an assignment for a doctor to accept or refuse.
+    """
+    DispatchService.reset()
+    start = client.post("/api/session/start",
+                        json={"fullName": "Auto Dispatch", "age": 61, "gender": "Male"})
+    sid = start.json()["sessionId"]
+
+    client.post(f"/api/session/{sid}/answer", json={
+        "answer": "Crushing chest pain radiating to my left arm with cold sweating",
+        "mode": "voice", "ayushMode": False, "field": "chiefComplaint",
+        "questionText": "What brings you in today?",
+    })
+
+    record = DispatchService.record_for(sid)
+    assert record is not None, "a red-flagged case was never dispatched to anyone"
+    assert record.currentOffer or record.status == "escalated"
+    if record.currentOffer:
+        # And it lands in that doctor's inbox, ready to accept or decline.
+        username, password = DOCTOR_LOGINS[record.currentOffer.doctorId]
+        inbox = client.get("/api/doctor/inbox",
+                           headers=doctor_auth(username, password)).json()
+        assert any(i["record"]["sessionId"] == sid for i in inbox)
+
+
+def test_a_still_raised_red_flag_does_not_restart_the_ladder():
+    """
+    The flag is re-evaluated on every subsequent answer and stays raised. Acting
+    on it again would re-page a doctor who is already on their way.
+    """
+    DispatchService.reset()
+    sid = client.post("/api/session/start",
+                      json={"fullName": "Repeat Flag", "age": 55, "gender": "Female"}
+                      ).json()["sessionId"]
+
+    for answer in ["Crushing chest pain radiating to my left arm with cold sweating",
+                   "It started about an hour ago", "The pain is still there"]:
+        client.post(f"/api/session/{sid}/answer", json={
+            "answer": answer, "mode": "voice", "ayushMode": False,
+            "field": "chiefComplaint", "questionText": "?"})
+
+    record = DispatchService.record_for(sid)
+    assert record is not None
+    offers = [h for h in record.history if h.status != "pending"]
+    assert len(offers) == 0, "the ladder restarted while an offer was outstanding"
+
+
 @pytest.mark.real_clock
 def test_the_clock_is_the_hospitals_not_the_containers():
     """
