@@ -43,10 +43,13 @@ export interface AdaptiveQuestion {
 
 export interface AudioTranscriptionResponse {
   transcript: string;
+  /** English rendering used by the clinical rules when speech was not English. */
+  clinicalText?: string;
+  error?: string;
   detectedLanguage: string;
   accent?: string;
   confidence: number;
-  source: 'whisper' | 'gemini_audio' | 'browser_native' | 'simulated' | 'indic_conformer';
+  source: 'whisper' | 'gemini_audio' | 'browser_native' | 'simulated' | 'indic_conformer' | 'transcription_failed';
   normalizedMedicalTerms: string[];
 }
 

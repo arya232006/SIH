@@ -46,15 +46,26 @@ class PatientAnswerRequest(BaseModel):
     medicalSystem: Optional[Literal["allopathy", "ayurveda", "homeopathy"]] = None
     field: Optional[str] = None
     questionText: Optional[str] = None
+    # Set when the answer was spoken in a non-English language: the verbatim words
+    # go on the record, this English rendering is what the clinical rules read.
+    clinicalText: Optional[str] = None
 
 # --- Audio & Speech Models ---
 class AudioTranscriptionResponse(BaseModel):
-    transcript: str
+    transcript: str                       # verbatim, in whatever the patient spoke
+    # English rendering used by the clinical engines. Red-flag detection, routing
+    # and symptom categorisation all match romanised/English keywords, so a
+    # correct Devanagari or Bengali transcript would match nothing and a patient
+    # describing a heart attack in Hindi would raise no red flag. The verbatim
+    # text is kept for the record; this is what the rules read.
+    clinicalText: Optional[str] = None
     detectedLanguage: str = "en-IN"
     accent: Optional[str] = "Indian English"
     confidence: float = 0.95
-    source: Literal["whisper", "gemini_audio", "browser_native", "simulated", "indic_conformer"] = "browser_native"
+    source: Literal["whisper", "gemini_audio", "browser_native", "simulated",
+                    "indic_conformer", "transcription_failed"] = "browser_native"
     normalizedMedicalTerms: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
 
 # --- Department & Doctor Routing Models ---
 class DepartmentRouting(BaseModel):
@@ -265,6 +276,10 @@ class PatientSession(BaseModel):
     connectivityStatus: Literal["online", "degraded", "offline"] = "online"
     flaggedForStaff: bool = False
     chiefComplaint: str = ""
+    # English rendering of the chief complaint when it was spoken in another
+    # language. The rule engines match romanised/English keywords, so without
+    # this a complaint given in Hindi matches nothing and raises no red flag.
+    chiefComplaintClinical: Optional[str] = None
     historyOfPresentIllness: HistoryOfPresentIllness = Field(default_factory=HistoryOfPresentIllness)
     pastMedicalHistory: List[str] = Field(default_factory=list)
     drugAllergyHistory: DrugAllergyHistory = Field(default_factory=DrugAllergyHistory)

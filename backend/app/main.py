@@ -149,9 +149,17 @@ async def submit_answer(session_id: str, req: PatientAnswerRequest):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # The clinical engines below -- red flags, routing, symptom category -- match
+    # romanised/English keywords. When the patient spoke another language the
+    # verbatim answer matches none of them, so the English rendering produced at
+    # transcription is what they read. The patient's own words stay on the record.
+    clinical_answer = (req.clinicalText or req.answer).strip() or req.answer
+
     # If first turn or chief complaint field, set chief complaint
     if not session.chiefComplaint or req.field == "chief_complaint":
         session.chiefComplaint = req.answer
+        # Keep the English rendering for the rules without losing what was said.
+        session.chiefComplaintClinical = clinical_answer
         session.fieldProvenance["chiefComplaint"] = "patient-conversation"
     else:
         # Append QA turn with proper field key and question text
@@ -175,7 +183,9 @@ async def submit_answer(session_id: str, req: PatientAnswerRequest):
             session.homeopathyMode = True
 
     # 1. Non-LLM Red Flag Safety Check (Independent of LLM)
-    red_flag = red_flag_detector.evaluate(session.chiefComplaint, session.conversationTurns)
+    red_flag = red_flag_detector.evaluate(
+        getattr(session, 'chiefComplaintClinical', None) or session.chiefComplaint,
+        session.conversationTurns)
     session.redFlag = red_flag
 
     if red_flag.triggered:
@@ -191,7 +201,8 @@ async def submit_answer(session_id: str, req: PatientAnswerRequest):
 
     # 2. Adaptive LLM Question Generation
     adaptive_resp = await llm_service.get_next_question(
-        chief_complaint=session.chiefComplaint,
+        chief_complaint=getattr(session, 'chiefComplaintClinical', None)
+                        or session.chiefComplaint,
         conversation_turns=session.conversationTurns,
         ayush_mode=session.ayushMode or req.ayushMode or (session.medicalSystem == "ayurveda"),
         homeopathy_mode=session.homeopathyMode or req.homeopathyMode or (session.medicalSystem == "homeopathy"),
