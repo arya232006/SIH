@@ -397,6 +397,21 @@ export class ApiService {
     return this.handleResponse<DoctorAccount[]>(res);
   }
 
+  // --- Operational modelling ---
+  static async getOpdEconomics(params: {
+    patients?: number; doctors?: number; kiosks?: number; doctorCost?: number;
+  } = {}): Promise<any> {
+    const q = new URLSearchParams();
+    if (params.patients) q.set('patients', String(params.patients));
+    if (params.doctors) q.set('doctors', String(params.doctors));
+    if (params.kiosks) q.set('kiosks', String(params.kiosks));
+    if (params.doctorCost) q.set('doctorCost', String(params.doctorCost));
+    const res = await fetch(`${API_BASE}/simulation/opd-economics?${q.toString()}`, {
+      headers: this.doctorHeaders()
+    });
+    return this.handleResponse(res);
+  }
+
   // --- Physician Dashboard (Authenticated as the signed-in doctor) ---
   static async getPhysicianQueue(): Promise<any[]> {
     const res = await fetch(`${API_BASE}/physician/queue`, { headers: this.doctorHeaders() });
