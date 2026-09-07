@@ -470,7 +470,6 @@ SAFETY RULES:
                 payload = {
                     "model": settings.OPENAI_MODEL,
                     "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-                    "temperature": 0.2,
                     "response_format": {"type": "json_object"}
                 }
                 async with httpx.AsyncClient(timeout=10.0) as client:

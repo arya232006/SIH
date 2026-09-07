@@ -1223,8 +1223,7 @@ OUTPUT STRICT JSON ONLY:
                             ]
                         }
                     ],
-                    "response_format": {"type": "json_object"},
-                    "temperature": 0.1
+                    "response_format": {"type": "json_object"}
                 }
                 async with httpx.AsyncClient(timeout=90.0) as client:
                     resp = await client.post(url, headers=headers, json=payload)
