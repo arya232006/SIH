@@ -87,6 +87,8 @@ event_log.subscribe("doctor_duty_changed", doctor_service.on_duty_changed,
                     "roster_capability_watch")
 event_log.subscribe("dispatch.handover_required", bed_service.on_handover_required,
                     "bed_handover")
+event_log.subscribe("dispatch.handover_accepted", bed_service.on_handover_accepted,
+                    "bed_handover_cleared")
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -1113,23 +1115,74 @@ async def get_doctor_dispatch_inbox(
         if session:
             dispatch_service.sweep(session)
 
-    inbox = []
-    for record in dispatch_service.offers_for_doctor(doctor.doctorId):
+    def _patient(record):
         session = session_store.get_session(record.sessionId)
-        inbox.append({
-            "record": record,
-            "patient": {
-                "sessionId": record.sessionId,
-                "patientName": session.patientName if session else "Unknown patient",
-                "tokenNumber": session.tokenNumber if session else "",
-                "age": session.age if session else None,
-                "gender": session.gender if session else None,
-                "chiefComplaint": session.chiefComplaint if session else "",
-                "redFlagReason": (session.redFlag.reason
-                                  if session and session.redFlag else ""),
-            },
-        })
+        return {
+            "sessionId": record.sessionId,
+            "patientName": session.patientName if session else "Unknown patient",
+            "tokenNumber": session.tokenNumber if session else "",
+            "age": session.age if session else None,
+            "gender": session.gender if session else None,
+            "chiefComplaint": session.chiefComplaint if session else "",
+            "redFlagReason": (session.redFlag.reason
+                              if session and session.redFlag else ""),
+        }
+
+    inbox = [{"kind": "offer", "record": r, "patient": _patient(r),
+              "holdsPrivilege": True}
+             for r in dispatch_service.offers_for_doctor(doctor.doctorId)]
+
+    # Patients whose doctor went off duty mid-treatment. Shown to everyone on
+    # shift rather than only to the credentialled: an unowned patient with
+    # nobody watching is the worse failure, and the card says plainly whether
+    # this doctor holds the privilege so custody is taken with eyes open.
+    duty = doctor_service.get_duty(doctor.doctorId)
+    if duty and duty.onShift and duty.dutyState != "off_duty":
+        for record in dispatch_service.handovers_pending():
+            if record.handoverFromDoctorId == doctor.doctorId:
+                continue          # they are the one who left
+            inbox.append({
+                "kind": "handover",
+                "record": record,
+                "patient": _patient(record),
+                "holdsPrivilege": record.requiredPrivilege in (doctor.privileges or []),
+            })
     return inbox
+
+
+@app.post("/api/dispatch/session/{session_id}/take-over", response_model=DispatchRecord)
+async def take_over_dispatch(
+    session_id: str,
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    Claim custody of a patient whose treating doctor went off duty.
+
+    A claim, not an assignment. The dispatcher re-offers cases nobody has
+    touched; this patient is already under treatment, so somebody has to
+    knowingly pick them up.
+    """
+    session = _require_session(session_id)
+    try:
+        record = dispatch_service.take_over(session, doctor)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    session.emergencyActionLog.append(
+        f"[{clock.stamp()}] {doctor.fullName} took over {record.condition} "
+        f"from {record.handoverFromName or 'the previous doctor'}")
+    session_store.update_session(session_id, session)
+
+    await event_log.emit(
+        "dispatch.handover_accepted",
+        {"sessionId": session_id, "condition": record.condition,
+         "doctorId": doctor.doctorId, "doctorName": doctor.fullName,
+         "previousDoctorName": record.handoverFromName,
+         "acuityWeight": record.acuityWeight},
+        actor=f"doctor:{doctor.doctorId}", sessionId=session_id)
+    return record
 
 @app.get("/api/simulation/opd-economics")
 async def simulate_opd_economics(

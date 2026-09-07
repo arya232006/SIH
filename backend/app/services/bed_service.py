@@ -255,6 +255,28 @@ class BedService:
             actor="policy:bed_management", sessionId=session_id,
             causedBy=event.eventId)
 
+    async def on_handover_accepted(self, event) -> None:
+        """
+        Third hop of the cascade. Somebody picked the patient up, so the bed
+        stops showing as unowned. Bed management learns this the same way it
+        learned the bed was abandoned -- by subscribing, not by being called.
+        """
+        from app.services.event_log import event_log
+
+        payload = event.payload or {}
+        session_id = payload.get("sessionId") or event.sessionId
+        allocation = self.allocations.get(session_id) if session_id else None
+        if not allocation or not allocation.handoverRequired:
+            return
+
+        allocation.handoverRequired = False
+        allocation.handoverReason = None
+        await event_log.emit(
+            "bed.handover_cleared",
+            {**allocation.to_dict(), "doctorName": payload.get("doctorName", "")},
+            actor="policy:bed_management", sessionId=session_id,
+            causedBy=event.eventId)
+
     async def on_record_completed(self, event) -> None:
         """Frees the bed when the visit closes."""
         from app.services.event_log import event_log

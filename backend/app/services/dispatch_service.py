@@ -814,14 +814,57 @@ class DispatchService:
         # 2. Cases they had accepted -- these need a person, not a reassignment.
         for record in cls._records.values():
             if record.status == "accepted" and record.acceptedByDoctorId == doctor_id:
+                who = payload.get("fullName", doctor_id)
+                record.handoverRequired = True
+                record.handoverFromDoctorId = doctor_id
+                record.handoverFromName = who
+                record.handoverReason = (
+                    f"{who} went off duty while this patient was under their care.")
                 await event_log.emit(
                     "dispatch.handover_required",
                     {"sessionId": record.sessionId, "condition": record.condition,
                      "doctorId": doctor_id,
-                     "doctorName": payload.get("fullName", doctor_id),
+                     "doctorName": who,
+                     "requiredPrivilege": record.requiredPrivilege,
                      "acuityWeight": record.acuityWeight},
                     actor="policy:dispatch", sessionId=record.sessionId,
                     causedBy=event.eventId)
+
+    # --- Handover ------------------------------------------------------------
+
+    @classmethod
+    def handovers_pending(cls) -> List[DispatchRecord]:
+        """Accepted cases whose owning doctor has gone, still waiting for one."""
+        return [r for r in cls._records.values() if r.handoverRequired]
+
+    @classmethod
+    def take_over(cls, session, doctor, now: Optional[datetime] = None) -> DispatchRecord:
+        """
+        A doctor claims custody of a patient whose clinician went off duty.
+
+        Deliberately a claim rather than an assignment. The dispatcher will
+        happily re-offer a case nobody has touched, but this patient is already
+        being treated, and the person who picks them up has to know they have.
+        """
+        now = now or clock.now()
+        record = cls._records.get(getattr(session, "sessionId", ""))
+        if record is None:
+            raise ValueError("No dispatch record for this session")
+        if not record.handoverRequired:
+            raise PermissionError("This case is not awaiting a handover")
+
+        previous = record.handoverFromDoctorId
+        if previous:
+            doctor_service.release_assignment(previous)
+
+        record.acceptedByDoctorId = doctor.doctorId
+        record.acceptedByName = doctor.fullName
+        record.acceptedAt = now.strftime("%H:%M:%S")
+        record.status = "accepted"
+        record.handoverRequired = False
+        record.handoverReason = None
+        doctor_service.record_assignment(doctor.doctorId, record.acuityWeight)
+        return record
 
     @classmethod
     def record_for(cls, session_id: str) -> Optional[DispatchRecord]:
