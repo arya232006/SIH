@@ -280,6 +280,7 @@ def test_a_server_with_no_speech_provider_says_so_instead_of_blaming_the_patient
     never set, and hides the one thing an operator could act on.
     """
     from app.config import settings
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
     monkeypatch.setattr(settings, "GROQ_API_KEY", "")
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
 
@@ -301,6 +302,7 @@ def test_a_provider_outage_is_reported_as_an_outage_not_as_unclear_speech(monkey
     """
     from app.config import settings
     from app.services.audio_service import AudioService
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
     monkeypatch.setattr(settings, "GROQ_API_KEY", "test-key")
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
 

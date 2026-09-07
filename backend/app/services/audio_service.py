@@ -203,7 +203,6 @@ class AudioService:
             "prompt": ("Indian OPD hospital intake: chest pain, blood pressure, sugar, "
                        "cough, fever, vomiting, jalan, ghabrahat, saans, seene mein dard, "
                        "bukhar, dolo 650, metformin, telma."),
-            "temperature": "0.0",
             "response_format": "verbose_json",
         }
         if lang and lang != "auto":
@@ -233,7 +232,7 @@ class AudioService:
                 "https://api.openai.com/v1/audio/translations",
                 headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
                 files={"file": (filename, audio_bytes, content_type)},
-                data={"model": settings.OPENAI_AUDIO_MODEL, "temperature": "0.0"})
+                data={"model": settings.OPENAI_AUDIO_MODEL})
             if resp.status_code != 200:
                 print(f"[OpenAI Audio translate] HTTP {resp.status_code}: {resp.text[:200]}")
                 return ""
