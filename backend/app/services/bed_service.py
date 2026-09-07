@@ -66,6 +66,10 @@ class BedAllocation:
     reasoning: List[str] = field(default_factory=list)
     escalation: List[str] = field(default_factory=list)
     assignedAt: Optional[str] = None
+    # Set when the doctor who owned this case left. The bed stays occupied --
+    # the patient is still in it -- but somebody must pick the case up.
+    handoverRequired: bool = False
+    handoverReason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -73,6 +77,8 @@ class BedAllocation:
             "label": self.label, "bedClass": self.bedClass,
             "requiredAcuity": self.requiredAcuity, "reasoning": self.reasoning,
             "escalation": self.escalation, "assignedAt": self.assignedAt,
+            "handoverRequired": self.handoverRequired,
+            "handoverReason": self.handoverReason,
         }
 
 
@@ -222,6 +228,32 @@ class BedService:
             sessionId=session_id,
             causedBy=event.eventId,
         )
+
+    async def on_handover_required(self, event) -> None:
+        """
+        Second hop of the cascade. Dispatch raised a handover because the owning
+        doctor left; the bed is not freed -- the patient is still in it -- but it
+        is marked so the board shows an unowned occupied bed rather than a
+        quietly abandoned one.
+        """
+        from app.services.event_log import event_log
+
+        payload = event.payload or {}
+        session_id = payload.get("sessionId") or event.sessionId
+        allocation = self.allocations.get(session_id) if session_id else None
+        if not allocation or allocation.status != "assigned":
+            return
+
+        allocation.handoverRequired = True
+        allocation.handoverReason = (
+            f"{payload.get('doctorName', 'The treating doctor')} went off duty "
+            f"while this patient was in {allocation.label}."
+        )
+        await event_log.emit(
+            "bed.handover_flagged",
+            {**allocation.to_dict(), "doctorName": payload.get("doctorName", "")},
+            actor="policy:bed_management", sessionId=session_id,
+            causedBy=event.eventId)
 
     async def on_record_completed(self, event) -> None:
         """Frees the bed when the visit closes."""

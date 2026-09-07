@@ -271,5 +271,52 @@ class DoctorService:
                 found.append(acc)
         return found
 
+    # --- Capability coverage ------------------------------------------------
+
+    # Privileges the hospital must always be able to perform. Losing the last
+    # holder is an operational emergency in itself, not merely a rota gap.
+    CRITICAL_PRIVILEGES = ["thrombolysis", "intubation", "cardiac_cath",
+                           "resuscitation", "acls"]
+
+    def capability_gaps(self, now: Optional[datetime] = None) -> List[Dict]:
+        """Critical privileges no available on-shift doctor currently holds."""
+        available = [
+            row["doctor"] for row in self.roster(now)
+            if row["duty"].onShift and row["duty"].dutyState in ("available", "on_rounds")
+        ]
+        gaps = []
+        for privilege in self.CRITICAL_PRIVILEGES:
+            holders = [d.fullName for d in available if privilege in d.privileges]
+            if not holders:
+                # Who could be recalled: on-call, or on shift but stepped away.
+                fallback = [
+                    row["doctor"].fullName for row in self.roster(now)
+                    if privilege in row["doctor"].privileges
+                    and (row["duty"].onCall or row["duty"].onShift)
+                ]
+                gaps.append({"privilege": privilege, "holdersAvailable": 0,
+                             "recallCandidates": fallback})
+        return gaps
+
+    async def on_duty_changed(self, event) -> None:
+        """
+        Third reaction to the same fact. Nothing tells the roster to check its
+        own coverage -- it subscribes and notices that the hospital can no
+        longer perform something it must always be able to perform.
+        """
+        from app.services.event_log import event_log
+
+        gaps = self.capability_gaps()
+        if not gaps:
+            return
+        await event_log.emit(
+            "roster.capability_gap",
+            {"gaps": gaps,
+             "triggeredBy": (event.payload or {}).get("fullName", ""),
+             "message": "No available on-shift doctor holds: "
+                        + ", ".join(g["privilege"] for g in gaps)},
+            actor="policy:roster", causedBy=event.eventId)
+
+
 
 doctor_service = DoctorService()

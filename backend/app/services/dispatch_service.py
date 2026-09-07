@@ -650,6 +650,76 @@ class DispatchService:
             return cls._escalate(record, session, now)
         return cls._offer_to(record, nxt, now)
 
+    # --- Reacting to the roster changing ------------------------------------
+
+    @classmethod
+    async def on_doctor_unavailable(cls, event) -> None:
+        """
+        A doctor going off duty must not silently strand their cases.
+
+        Subscribed to the roster, not called by it. The duty endpoint knows
+        nothing about the dispatch ledger; it records a fact and this reacts --
+        which is the point of the substrate. Cases still awaiting a response go
+        back out to the next candidate, and cases already accepted raise a
+        handover, which bed management then reacts to in turn.
+        """
+        from app.services.event_log import event_log
+        from app.store import session_store
+
+        payload = event.payload or {}
+        if payload.get("dutyState") != "off_duty":
+            return
+        doctor_id = payload.get("doctorId")
+        if not doctor_id:
+            return
+
+        # 1. Offers this doctor never answered -- re-offer them.
+        for record in list(cls.offers_for_doctor(doctor_id)):
+            session = session_store.get_session(record.sessionId)
+            if not session:
+                continue
+            offer = record.currentOffer
+            offer.status = "expired"
+            offer.respondedAt = clock.now().isoformat()
+            record.history.append(offer)
+            record.declinedDoctorIds.append(doctor_id)
+            doctor_service.release_assignment(doctor_id)
+
+            now = clock.now()
+            nxt = cls._next_candidate(session, record, now)
+            if nxt is None:
+                cls._escalate(record, session, now)
+                await event_log.emit(
+                    "dispatch.escalated",
+                    {"sessionId": record.sessionId, "condition": record.condition,
+                     "reason": f"{payload.get('fullName', doctor_id)} went off duty and "
+                               f"no other doctor holds '{record.requiredPrivilege}'.",
+                     "escalation": record.escalation},
+                    actor="policy:dispatch", sessionId=record.sessionId,
+                    causedBy=event.eventId)
+            else:
+                cls._offer_to(record, nxt, now)
+                await event_log.emit(
+                    "dispatch.reoffered",
+                    {"sessionId": record.sessionId, "condition": record.condition,
+                     "previousDoctorId": doctor_id,
+                     "reofferedTo": nxt.fullName, "reofferedToDoctorId": nxt.doctorId,
+                     "reason": "Previous doctor went off duty before responding."},
+                    actor="policy:dispatch", sessionId=record.sessionId,
+                    causedBy=event.eventId)
+
+        # 2. Cases they had accepted -- these need a person, not a reassignment.
+        for record in cls._records.values():
+            if record.status == "accepted" and record.acceptedByDoctorId == doctor_id:
+                await event_log.emit(
+                    "dispatch.handover_required",
+                    {"sessionId": record.sessionId, "condition": record.condition,
+                     "doctorId": doctor_id,
+                     "doctorName": payload.get("fullName", doctor_id),
+                     "acuityWeight": record.acuityWeight},
+                    actor="policy:dispatch", sessionId=record.sessionId,
+                    causedBy=event.eventId)
+
     @classmethod
     def record_for(cls, session_id: str) -> Optional[DispatchRecord]:
         return cls._records.get(session_id)

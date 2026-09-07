@@ -36,6 +36,7 @@ from app.services.staff_service import staff_service
 from app.services.doctor_service import doctor_service
 from app.services.dispatch_service import dispatch_service
 from app.services.dispatch_simulation import DispatchSimulation
+from app.services.opd_simulation import OPDSimulation
 from app.services.audio_service import audio_service
 from app.services.medication_clarification_service import MedicationClarificationService
 from app.services.ddi_service import DDIService
@@ -60,6 +61,20 @@ event_log.subscribe("emergency_dispatch_accepted", bed_service.on_dispatch_accep
                     "bed_management")
 event_log.subscribe("physician_record_saved", bed_service.on_record_completed,
                     "bed_release")
+
+# One fact, three independent reactions. A doctor going off duty is recorded by
+# the roster endpoint, which knows nothing about dispatch, beds or capability
+# cover. Each of these subscribed to that fact on its own:
+#   doctor_duty_changed -> dispatch re-offers their unanswered cases
+#                       -> dispatch raises a handover for cases they had accepted
+#                          -> bed management flags the bed as unowned
+#                       -> the roster notices the hospital just lost a capability
+event_log.subscribe("doctor_duty_changed", dispatch_service.on_doctor_unavailable,
+                    "dispatch_reassign")
+event_log.subscribe("doctor_duty_changed", doctor_service.on_duty_changed,
+                    "roster_capability_watch")
+event_log.subscribe("dispatch.handover_required", bed_service.on_handover_required,
+                    "bed_handover")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -1074,6 +1089,29 @@ async def get_doctor_dispatch_inbox(
         if session:
             dispatch_service.sweep(session)
     return dispatch_service.offers_for_doctor(doctor.doctorId)
+
+@app.get("/api/simulation/opd-economics")
+async def simulate_opd_economics(
+    patients: int = Query(1200, ge=100, le=20000),
+    doctors: int = Query(12, ge=1, le=200),
+    kiosks: Optional[int] = Query(None, description="omit to let the model size it"),
+    seed: int = Query(7),
+    doctor: DoctorAccount = Depends(get_current_doctor)
+):
+    """
+    Models one outpatient day under three intake arrangements and reports the
+    difference in doctor time, waiting and cost per patient.
+
+    These are projections from the stated assumptions, which are returned with
+    the result so they can be argued with rather than taken on faith. Cost is
+    reported per patient SEEN: comparing total daily cost across arrangements
+    that served different numbers of people would reward serving fewer.
+    """
+    sim = OPDSimulation(seed=seed)
+    result = sim.compare(patients=patients, doctors=doctors, kiosks=kiosks)
+    result["capacityCurve"] = sim.capacity_curve(
+        patients, doctors, max_kiosks=max(4, result["scenario"]["kiosks"] + 6))
+    return result
 
 @app.get("/api/dispatch/benchmark")
 async def benchmark_dispatch_policies(

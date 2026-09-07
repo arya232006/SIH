@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services.bed_service import BED_CLASS_ACUITY, BedService
+from app.services.dispatch_service import DispatchService
 from app.services.event_log import EventLog, event_log
 
 client = TestClient(app)
@@ -214,3 +215,194 @@ def test_the_bed_event_records_what_caused_it():
 def test_event_endpoints_require_authentication():
     assert client.get("/api/events").status_code == 401
     assert client.get("/api/beds").status_code == 401
+
+
+# --- One fact, several independent reactions --------------------------------
+
+def _isolated_world():
+    """Fresh roster, ledger and ward, wired to the live event log."""
+    import app.services.dispatch_service as dmod
+    from app.services.bed_service import bed_service
+    from app.services.doctor_service import DoctorService
+    svc = DoctorService()
+    dmod.doctor_service = svc
+    DispatchService.reset()
+    bed_service.reset()
+    event_log.reset()
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_doctor_going_off_duty_reoffers_their_unanswered_case():
+    """
+    The duty endpoint knows nothing about the dispatch ledger. Dispatch
+    subscribes to the fact and reacts, so a case is never stranded with a
+    doctor who has left.
+    """
+    from app.models import PatientSession, RedFlag, HistoryOfPresentIllness
+    from app.store import session_store
+
+    svc = _isolated_world()
+    session = PatientSession(sessionId="cascade-1", patientId="p", visitId="v",
+                             tokenNumber="T", patientName="Test", age=58, gender="Male")
+    session.redFlag = RedFlag(triggered=True, action="", urgency="emergency",
+                              reason="Potential Acute Stroke Warning (focal deficit)")
+    session.historyOfPresentIllness = HistoryOfPresentIllness(onset="1 hour ago")
+    session_store._sessions["cascade-1"] = session
+
+    record = DispatchService.dispatch(session)
+    paged = record.currentOffer.doctorId
+    assert record.status == "pending"
+
+    svc.set_duty_state(paged, "off_duty")
+    await event_log.emit("doctor_duty_changed",
+                         {"doctorId": paged, "dutyState": "off_duty",
+                          "fullName": "Test Doctor"})
+
+    after = DispatchService.record_for("cascade-1")
+    assert paged in after.declinedDoctorIds
+    if after.currentOffer:
+        assert after.currentOffer.doctorId != paged
+        assert any(e.type == "dispatch.reoffered" for e in event_log.all(200))
+    else:
+        assert after.status == "escalated"
+
+
+@pytest.mark.asyncio
+async def test_an_accepted_case_raises_a_handover_that_flags_the_bed():
+    """Two hops: dispatch raises the handover, bed management reacts to it."""
+    from app.models import PatientSession, RedFlag, HistoryOfPresentIllness
+    from app.services.bed_service import bed_service
+    from app.store import session_store
+
+    svc = _isolated_world()
+    session = PatientSession(sessionId="cascade-2", patientId="p", visitId="v",
+                             tokenNumber="T", patientName="Test", age=58, gender="Male")
+    session.redFlag = RedFlag(triggered=True, action="", urgency="emergency",
+                              reason="Potential Acute Stroke Warning (focal deficit)")
+    session.historyOfPresentIllness = HistoryOfPresentIllness(onset="1 hour ago")
+    session_store._sessions["cascade-2"] = session
+
+    record = DispatchService.dispatch(session)
+    owner_id = record.currentOffer.doctorId
+    owner = svc.get_doctor_by_id(owner_id)
+    DispatchService.accept(session, owner)
+    bed_service.allocate("cascade-2", required_acuity=5.0, patient_name="Test")
+
+    svc.set_duty_state(owner_id, "off_duty")
+    await event_log.emit("doctor_duty_changed",
+                         {"doctorId": owner_id, "dutyState": "off_duty",
+                          "fullName": owner.fullName})
+
+    types = [e.type for e in event_log.all(200)]
+    assert "dispatch.handover_required" in types
+    assert "bed.handover_flagged" in types
+
+    allocation = bed_service.allocations["cascade-2"]
+    assert allocation.handoverRequired is True
+    assert allocation.status == "assigned", "the patient is still in the bed"
+
+    # The chain is traceable back to the single originating fact.
+    flagged = next(e for e in event_log.all(200) if e.type == "bed.handover_flagged")
+    chain = [e.type for e in event_log.causal_chain(flagged.eventId)]
+    assert chain == ["doctor_duty_changed", "dispatch.handover_required",
+                     "bed.handover_flagged"]
+
+
+@pytest.mark.asyncio
+async def test_the_roster_notices_when_a_capability_leaves_the_building():
+    """
+    Losing the last holder of a critical privilege is an operational emergency,
+    not a rota gap. Nothing asks the roster to check; it subscribes.
+
+    Uses the live singleton rather than an isolated roster, because the
+    subscriber registered at startup is bound to that instance -- an isolated
+    copy would be checked by nothing.
+    """
+    from app.services.doctor_service import doctor_service as live
+
+    event_log.reset()
+    original = dict(live._explicit_state)
+    try:
+        for row in live.roster():
+            if row["duty"].onShift:
+                live.set_duty_state(row["doctor"].doctorId, "off_duty")
+
+        await event_log.emit("doctor_duty_changed",
+                             {"doctorId": "DOC-EMER-301", "dutyState": "off_duty",
+                              "fullName": "Dr. Imran Khan"})
+
+        gap_events = [e for e in event_log.all(200)
+                      if e.type == "roster.capability_gap"]
+        assert gap_events, "the hospital lost every capability and said nothing"
+        gaps = gap_events[0].payload["gaps"]
+        assert any(g["privilege"] == "thrombolysis" for g in gaps)
+        assert gap_events[0].actor == "policy:roster"
+        # It also says who could be recalled, rather than only reporting a hole.
+        assert any(g["recallCandidates"] for g in gaps)
+    finally:
+        for row in live.roster():
+            live.set_duty_state(row["doctor"].doctorId, "available")
+        live._explicit_state = original
+
+
+def test_capability_gaps_are_empty_when_the_roster_is_covered():
+    svc = _isolated_world()
+    assert svc.capability_gaps() == [] or all(
+        g["privilege"] not in ("thrombolysis", "acls") for g in svc.capability_gaps())
+
+
+# --- OPD economics ----------------------------------------------------------
+
+def test_kiosk_frees_doctor_time_per_patient():
+    """The mechanism the whole project rests on, stated as a number."""
+    from app.services.opd_simulation import OPDSimulation
+    sim = OPDSimulation(seed=7)
+    out = sim.compare(patients=1200, doctors=12)
+    h = out["headline"]
+    assert h["doctorMinutesPerPatientKiosk"] < h["doctorMinutesPerPatientBaseline"]
+    assert h["costPerPatientKiosk"] < h["costPerPatientBaseline"]
+
+
+def test_too_few_kiosks_makes_things_worse_and_says_so():
+    """
+    A model that always flatters the idea is worthless. With too few terminals
+    the queue moves from the doctor's door to the kiosk and throughput falls
+    below doing nothing -- the result must report that rather than hide it.
+    """
+    from app.services.opd_simulation import OPDSimulation
+    sim = OPDSimulation(seed=7)
+    starved = sim.compare(patients=1200, doctors=12, kiosks=2)
+    assert starved["headline"]["intakeIsBottleneck"] is True
+    assert starved["headline"]["additionalPatientsSeenPerDay"] < 0
+    assert "too few kiosks" in starved["headline"]["note"].lower()
+
+
+def test_capacity_curve_saturates_once_doctors_become_the_limit():
+    from app.services.opd_simulation import OPDSimulation
+    sim = OPDSimulation(seed=7)
+    curve = sim.capacity_curve(1200, 12, max_kiosks=20)
+    seen = [row["patientsSeen"] for row in curve]
+    assert seen == sorted(seen), "adding kiosks must never reduce throughput"
+    assert seen[-1] - seen[-2] < seen[1] - seen[0], "returns should diminish"
+
+
+def test_nurse_desks_do_not_scale():
+    """The problem statement's own argument, reproduced by the model."""
+    from app.services.opd_simulation import OPDSimulation
+    out = OPDSimulation(seed=7).compare(patients=1200, doctors=12)
+    nurse = next(r for r in out["results"] if r["mode"] == "nurse_desk")
+    kiosk = next(r for r in out["results"] if r["mode"] == "kiosk")
+    assert nurse["patientsSeen"] < kiosk["patientsSeen"]
+    assert nurse["costPerPatientSeen"] > kiosk["costPerPatientSeen"]
+
+
+def test_assumptions_are_returned_so_they_can_be_challenged():
+    from app.services.opd_simulation import OPDSimulation
+    out = OPDSimulation().compare(patients=600, doctors=6)
+    assert "doctorCostPerHour" in out["assumptions"]
+    assert "kioskIntakeMinutes" in out["assumptions"]
+
+
+def test_economics_endpoint_requires_authentication():
+    assert client.get("/api/simulation/opd-economics").status_code == 401
