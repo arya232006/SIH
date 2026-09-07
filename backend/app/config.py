@@ -25,15 +25,18 @@ class Settings:
     API_V1_STR: str = "/api"
     
     # LLM Settings
-    # Supported: "gemini", "groq", "openrouter", "huggingface", "mock"
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "gemini").lower()
+    # Supported: "openai", "gemini", "groq", "openrouter", "huggingface", "mock"
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai").lower()
     
+    OPENAI_API_KEY: str = _key("OPENAI_API_KEY")
     GEMINI_API_KEY: str = _key("GEMINI_API_KEY")
     GROQ_API_KEY: str = _key("GROQ_API_KEY")
     OPENROUTER_API_KEY: str = _key("OPENROUTER_API_KEY")
     HF_API_KEY: str = _key("HF_API_KEY")
     
     # Model Names
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+    OPENAI_AUDIO_MODEL: str = os.getenv("OPENAI_AUDIO_MODEL", "whisper-1")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")

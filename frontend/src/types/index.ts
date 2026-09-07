@@ -49,7 +49,7 @@ export interface AudioTranscriptionResponse {
   detectedLanguage: string;
   accent?: string;
   confidence: number;
-  source: 'whisper' | 'gemini_audio' | 'browser_native' | 'simulated' | 'indic_conformer' | 'transcription_failed';
+  source: 'openai' | 'openai_whisper' | 'whisper' | 'gemini_audio' | 'browser_native' | 'simulated' | 'indic_conformer' | 'transcription_failed';
   normalizedMedicalTerms: string[];
 }
 
@@ -508,7 +508,7 @@ export interface CDSSResponse {
   keyPointsToNotice: string[];
   recommendedInvestigations: string[];
   clinicalRationale: string;
-  source: 'gemini' | 'groq' | 'openrouter' | 'guideline_rules';
+  source: 'openai' | 'gemini' | 'groq' | 'openrouter' | 'guideline_rules';
   disclaimer: string;
 }
 

@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 import io
 import urllib.parse
+from contextlib import asynccontextmanager
 import httpx
 
 from app.config import settings
@@ -73,6 +74,13 @@ event_log.subscribe("physician_record_saved", bed_service.on_record_completed,
 #                       -> dispatch raises a handover for cases they had accepted
 #                          -> bed management flags the bed as unowned
 #                       -> the roster notices the hospital just lost a capability
+# The kiosk detecting an emergency is what starts the ladder. Without this the
+# red flag reached the staff dashboard and stopped there: automatic assignment
+# existed in full and was never triggered, so no doctor was ever paged and there
+# was nothing for one to accept or refuse.
+event_log.subscribe("red_flag_alert", dispatch_service.on_red_flag_raised,
+                    "auto_dispatch")
+
 event_log.subscribe("doctor_duty_changed", dispatch_service.on_doctor_unavailable,
                     "dispatch_reassign")
 event_log.subscribe("doctor_duty_changed", doctor_service.on_duty_changed,
@@ -80,10 +88,30 @@ event_log.subscribe("doctor_duty_changed", doctor_service.on_duty_changed,
 event_log.subscribe("dispatch.handover_required", bed_service.on_handover_required,
                     "bed_handover")
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """
+    Red-flagged cases that predate this process still need a doctor.
+
+    Seeded and restored sessions never emitted the event that starts dispatch,
+    so without this a freshly started service lists emergencies in the queue
+    that nobody has been asked to take.
+    """
+    try:
+        paged = await dispatch_service.dispatch_open_emergencies()
+        if paged:
+            print(f"[Dispatch] Paged doctors for {paged} open emergency case(s).")
+    except Exception as e:
+        # Never let this stop the service from coming up.
+        print(f"[Dispatch] Startup paging failed: {type(e).__name__}: {e}")
+    yield
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="MediKiosk AI Clinical History Platform API — FastAPI Backend",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS Middleware
@@ -135,6 +163,7 @@ async def health_check():
         "status": "healthy",
         "service": "MediKiosk Backend",
         "llm_provider": settings.LLM_PROVIDER,
+        "openai_configured": bool(settings.OPENAI_API_KEY),
         "gemini_configured": bool(settings.GEMINI_API_KEY),
         "groq_configured": bool(settings.GROQ_API_KEY),
         "openrouter_configured": bool(settings.OPENROUTER_API_KEY),
@@ -984,25 +1013,9 @@ async def dispatch_emergency(
     Idempotent -- calling again returns the live record.
     """
     session = _require_session(session_id)
-    record = dispatch_service.dispatch(session)
-
-    if record.currentOffer:
-        session.emergencyActionLog.append(
-            f"[{clock.stamp()}] Auto-assigned to "
-            f"{record.currentOffer.doctorName} for {record.condition}, "
-            f"awaiting acceptance ({record.currentOffer.respondBySeconds}s)"
-        )
-        session_store.update_session(session_id, session)
-        await staff_service.broadcast_event("emergency_dispatch_offered", {
-            "sessionId": session_id,
-            "tokenNumber": session.tokenNumber,
-            "patientName": session.patientName,
-            "doctorId": record.currentOffer.doctorId,
-            "doctorName": record.currentOffer.doctorName,
-            "condition": record.condition,
-            "respondBySeconds": record.currentOffer.respondBySeconds
-        })
-    return record
+    # Same path the automatic trigger takes, so a case behaves identically
+    # whether the kiosk raised it or somebody pressed the button.
+    return await dispatch_service.dispatch_and_announce(session)
 
 @app.get("/api/dispatch/session/{session_id}", response_model=DispatchRecord)
 async def get_dispatch_record(
