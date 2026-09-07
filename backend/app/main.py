@@ -1095,6 +1095,8 @@ async def simulate_opd_economics(
     patients: int = Query(1200, ge=100, le=20000),
     doctors: int = Query(12, ge=1, le=200),
     kiosks: Optional[int] = Query(None, description="omit to let the model size it"),
+    doctorCost: Optional[float] = Query(None, ge=100, le=10000,
+                                        description="INR per doctor-hour; the figure the result is most sensitive to"),
     seed: int = Query(7),
     doctor: DoctorAccount = Depends(get_current_doctor)
 ):
@@ -1107,7 +1109,8 @@ async def simulate_opd_economics(
     reported per patient SEEN: comparing total daily cost across arrangements
     that served different numbers of people would reward serving fewer.
     """
-    sim = OPDSimulation(seed=seed)
+    overrides = {"doctorCostPerHour": doctorCost} if doctorCost else None
+    sim = OPDSimulation(seed=seed, assumptions=overrides)
     result = sim.compare(patients=patients, doctors=doctors, kiosks=kiosks)
     result["capacityCurve"] = sim.capacity_curve(
         patients, doctors, max_kiosks=max(4, result["scenario"]["kiosks"] + 6))

@@ -8,6 +8,7 @@ import { KioskContainer } from './pages/Kiosk/KioskContainer';
 import { PhysicianQueue } from './pages/Physician/PhysicianQueue';
 import { ClinicalReview } from './pages/Physician/ClinicalReview';
 import { RequireDoctor } from './pages/Physician/RequireDoctor';
+import { OpdEconomics } from './pages/Economics/OpdEconomics';
 import { EmergencyDashboard } from './pages/Emergency/EmergencyDashboard';
 import { StaffLogin } from './pages/Staff/StaffLogin';
 import { StaffMonitor } from './pages/Staff/StaffMonitor';
@@ -380,6 +381,12 @@ export const App: React.FC = () => {
             <Route
               path="/physician/session/:sessionId"
               element={<RequireDoctor><ClinicalReview /></RequireDoctor>}
+            />
+
+            {/* Operational and cost modelling */}
+            <Route
+              path="/economics"
+              element={<RequireDoctor><OpdEconomics /></RequireDoctor>}
             />
 
             {/* Dedicated Emergency & Casualty Red-Flag Flow (requires a signed-in doctor) */}
